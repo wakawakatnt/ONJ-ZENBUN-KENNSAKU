@@ -3,27 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONJ 最新10件表示（モジュール式 v12）</title>
+<title>ONJ 最新10件表示（デバッグ版）</title>
 <style>
   body { font-family: system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN',Meiryo,Arial; margin: 18px; }
   input { padding: 6px; width: 60%; }
   button { padding: 6px; }
   .post { border: 1px solid #ccc; border-radius: 6px; padding: 6px; margin: 6px 0; cursor: pointer; }
   .content { display: none; padding-top: 4px; white-space: pre-wrap; }
+  .debug { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 4px; font-family: monospace; }
 </style>
 </head>
 <body>
-
-<h2>ONJ 最新10件表示</h2>
+<h2>ONJ 最新10件表示（デバッグ版）</h2>
 <input type="text" id="searchInput" placeholder="検索ワード">
 <button id="searchBtn">検索</button>
-
+<div class="debug" id="debugInfo">デバッグ情報を読み込み中...</div>
 <div id="results"></div>
-
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
   import { getFirestore, collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
-
+  
   // Firebase 初期化
   const firebaseConfig = {
     apiKey: "AIzaSyA2Z-JByRuaSv88nAj356nOh4CNgQb0_SY",
@@ -34,40 +33,92 @@
     appId: "1:171332002735:web:c8dcad3ae133300900855a",
     measurementId: "G-DDHGB57HTW"
   };
-
+  
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-
   let allPosts = [];
-
+  
+  function updateDebugInfo(info) {
+    document.getElementById('debugInfo').innerHTML = info;
+  }
+  
   async function fetchPosts() {
     try {
-      const q = query(
-        collection(db, "posts"),
-        orderBy("createdAt", "desc"), // FirestoreにcreatedAtがある場合
-        limit(10)
-      );
-      const snapshot = await getDocs(q);
-      allPosts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      updateDebugInfo('Firestoreに接続中...');
+      
+      // まず単純にコレクション全体を取得してみる
+      const simpleQuery = collection(db, "posts");
+      const simpleSnapshot = await getDocs(simpleQuery);
+      
+      updateDebugInfo(`
+        コレクション名: posts<br>
+        取得したドキュメント数: ${simpleSnapshot.docs.length}<br>
+        ${simpleSnapshot.docs.length > 0 ? 
+          `最初のドキュメントの構造:<br>${JSON.stringify(simpleSnapshot.docs[0].data(), null, 2)}` 
+          : 'ドキュメントが存在しません'}
+      `);
+      
+      if (simpleSnapshot.docs.length === 0) {
+        document.getElementById('results').textContent = 'postsコレクションにデータが存在しません';
+        return;
+      }
+      
+      // データが存在する場合、orderByを試す
+      try {
+        const q = query(
+          collection(db, "posts"),
+          orderBy("createdAt", "desc"),
+          limit(10)
+        );
+        const snapshot = await getDocs(q);
+        allPosts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        updateDebugInfo(`
+          コレクション名: posts<br>
+          取得したドキュメント数: ${snapshot.docs.length}<br>
+          orderBy使用: createdAt (降順)<br>
+          最初のドキュメントの構造:<br>${JSON.stringify(allPosts[0] || {}, null, 2)}
+        `);
+        
+      } catch (orderError) {
+        // orderByが失敗した場合、createdAtフィールドが存在しないか、インデックスが不足している
+        updateDebugInfo(`
+          orderByエラー: ${orderError.message}<br>
+          createdAtフィールドが存在しないか、Firestoreのインデックスが必要です<br>
+          単純なクエリで最初の10件を取得します
+        `);
+        
+        const fallbackQuery = query(collection(db, "posts"), limit(10));
+        const fallbackSnapshot = await getDocs(fallbackQuery);
+        allPosts = fallbackSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      }
+      
       renderPosts(allPosts);
+      
     } catch (err) {
-      document.getElementById('results').textContent = '読み込みエラー: ' + err;
+      const errorMessage = `読み込みエラー: ${err.message}`;
+      document.getElementById('results').textContent = errorMessage;
+      updateDebugInfo(`エラー詳細: ${JSON.stringify(err, null, 2)}`);
       console.error(err);
     }
   }
-
+  
   function renderPosts(posts) {
     const resultsDiv = document.getElementById('results');
     resultsDiv.innerHTML = '';
+    
     if (posts.length === 0) {
       resultsDiv.textContent = 'データが見つかりません';
       return;
     }
+    
     posts.forEach(post => {
       const postDiv = document.createElement('div');
       postDiv.className = 'post';
-      postDiv.innerHTML = `<strong>${post.title || '無題'}</strong>
-                           <div class="content">${post.content || ''}</div>`;
+      postDiv.innerHTML = `
+        <strong>${post.title || post.name || post.subject || 'ID: ' + post.id}</strong>
+        <div class="content">${post.content || post.body || post.text || 'コンテンツなし'}</div>
+      `;
       postDiv.onclick = () => {
         const contentDiv = postDiv.querySelector('.content');
         contentDiv.style.display = contentDiv.style.display === 'none' ? 'block' : 'none';
@@ -75,22 +126,22 @@
       resultsDiv.appendChild(postDiv);
     });
   }
-
+  
   function searchPosts() {
     const keyword = document.getElementById('searchInput').value.toLowerCase();
-    const filtered = allPosts.filter(post => 
-      (post.title && post.title.toLowerCase().includes(keyword)) ||
-      (post.content && post.content.toLowerCase().includes(keyword))
-    );
+    const filtered = allPosts.filter(post => {
+      const searchableFields = [post.title, post.name, post.subject, post.content, post.body, post.text];
+      return searchableFields.some(field => 
+        field && field.toLowerCase().includes(keyword)
+      );
+    });
     renderPosts(filtered);
   }
-
+  
   document.getElementById('searchBtn').addEventListener('click', searchPosts);
-
+  
   // ページ読み込み時に最新10件取得
   fetchPosts();
-
 </script>
-
 </body>
 </html>
