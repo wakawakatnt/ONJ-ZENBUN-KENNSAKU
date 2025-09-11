@@ -3,29 +3,46 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONJ 掲示板データ表示</title>
+<title>ONJ 掲示板データ検索</title>
 <style>
-  body { font-family: system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN',Meiryo,Arial; margin: 18px; line-height: 1.5; }
-  input { padding: 8px; width: 70%; margin-right: 10px; }
-  button { padding: 8px 15px; }
-  .controls { margin-bottom: 20px; }
-  .info { background: #e3f2fd; padding: 10px; margin-bottom: 15px; border-radius: 6px; }
-  .post { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 8px 0; cursor: pointer; background: #fafafa; transition: background-color 0.2s; }
-  .post:hover { background: #f0f0f0; }
-  .post-header { font-weight: bold; color: #1976d2; margin-bottom: 4px; }
-  .post-meta { font-size: 0.9em; color: #666; margin-bottom: 8px; }
-  .post-content { white-space: pre-wrap; line-height: 1.4; }
-  .highlight { background-color: #ffeb3b; padding: 1px 2px; }
+  body { font-family: system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN',Meiryo,Arial; margin: 18px; line-height: 1.5; background-color: #f4f4f9; color: #333; }
+  input { padding: 10px; width: 70%; margin-right: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 1em; }
+  button { padding: 10px 18px; border: none; border-radius: 6px; background-color: #1976d2; color: white; cursor: pointer; font-size: 1em; }
+  button:hover { background-color: #1565c0; }
+  #clearBtn { background-color: #757575; }
+  #clearBtn:hover { background-color: #616161; }
+  .controls { margin-bottom: 20px; display: flex; align-items: center; }
+  .info { background: #e3f2fd; padding: 12px; margin-bottom: 20px; border-radius: 6px; border-left: 5px solid #1976d2; }
+
+  /* スレッド検索結果のスタイル */
+  .thread-result { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 12px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .thread-header { padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background-color 0.2s; }
+  .thread-header:hover { background: #f5f5f5; }
+  .thread-title { font-weight: bold; color: #1976d2; }
+  .match-count { font-size: 0.9em; color: #666; background-color: #e0e0e0; padding: 3px 8px; border-radius: 12px; }
+  .thread-details { display: none; padding: 0 15px 15px; border-top: 1px solid #eee; }
+  .thread-meta { padding: 12px 0; font-size: 0.95em; }
+  .thread-meta a { color: #007bff; text-decoration: none; }
+  .thread-meta a:hover { text-decoration: underline; }
+  
+  /* レスのスタイル */
+  .post { border-top: 1px dashed #ccc; padding: 12px 0; }
+  .post:first-child { border-top: none; }
+  .post-header { display: none; } /* Redundant with post-meta */
+  .post-meta { font-size: 0.9em; color: #555; margin-bottom: 8px; }
+  .post-meta strong { color: #008000; }
+  .post-content { white-space: pre-wrap; line-height: 1.6; background: #fafafa; padding: 10px; border-radius: 4px;}
+  .highlight { background-color: #ffeb3b; padding: 1px 2px; border-radius: 2px; }
 </style>
 </head>
 <body>
-<h2>ONJ 掲示板データ表示</h2>
+<h2>ONJ 掲示板データ検索</h2>
 <div class="controls">
   <input type="text" id="searchInput" placeholder="検索ワード（名前、ID、投稿内容）">
   <button id="searchBtn">検索</button>
   <button id="clearBtn">クリア</button>
 </div>
-<div id="info" class="info"></div>
+<div id="info" class="info">ここにデータ情報や検索結果が表示されます。</div>
 <div id="results"></div>
 
 <script type="module">
@@ -44,63 +61,71 @@
   
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  let allPosts = [];
-  let originalData = null;
-  
+  let allThreads = [];
+  let originalDataInfo = {};
+
   function parseContentData(content) {
-    const posts = [];
-    const lines = content.split('\n');
-    let currentPost = null;
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      // タイムスタンプの行をチェック（=!=!=で始まる）
-      if (line.startsWith('=!=!=')) {
-        // 前のポストがあれば保存
-        if (currentPost) {
-          posts.push(currentPost);
+    const threads = [];
+    // スレッドID (=!=!=) で全体を分割
+    const threadBlocks = content.split('=!=!=');
+
+    for (const block of threadBlocks) {
+        const trimmedBlock = block.trim();
+        if (!trimmedBlock) continue;
+        
+        const lines = trimmedBlock.split('\n');
+        const threadId = lines.shift().trim(); // 最初の行がID
+        if (!threadId) continue;
+
+        const threadContent = lines.join('\n');
+        
+        // "名無しさん＠おーぷん<><>" を基準にレスを分割
+        const postStrings = threadContent.split(/(?=名無しさん＠おーぷん<><>)/).filter(s => s.trim());
+        if (postStrings.length === 0) continue;
+
+        const posts = [];
+        let threadTitle = "（タイトル不明）";
+
+        // 各レス文字列を解析
+        postStrings.forEach((postStr, index) => {
+            const parts = postStr.split('<>');
+            if (parts.length < 4) return;
+
+            const author = parts[0];
+            const postDetails = parts[2];
+            let postContent = parts.slice(3).join('<>');
+
+            // 最初のレスからタイトルを抽出
+            if (index === 0) {
+              const contentParts = postContent.split(/<br>|\n/);
+              // 最後の意味のある行をタイトルとする
+              threadTitle = contentParts.filter(p => p.trim()).pop() || threadTitle;
+              // タイトル部分を本文から削除する場合
+              // postContent = postContent.replace(new RegExp(threadTitle + '$'), '').trim();
+            }
+            
+            const idMatch = postDetails.match(/(\d{2}\/\d{2}\/\d{2}\(.+?\) \d{2}:\d{2}:\d{2}) ID:(\S+)/);
+            if (idMatch) {
+                posts.push({
+                    author: author.trim(),
+                    postTime: idMatch[1],
+                    userId: idMatch[2],
+                    content: postContent.replace(/<br>/g, '\n').trim()
+                });
+            }
+        });
+        
+        if (posts.length > 0) {
+          threads.push({
+            id: threadId,
+            title: threadTitle,
+            link: `https://hayabusa.open2ch.net/test/read.cgi/livejupiter/${threadId}/`,
+            posts: posts,
+            lastUpdated: posts[posts.length - 1].postTime
+          });
         }
-        // 新しいポストの開始
-        currentPost = {
-          timestamp: line.replace(/=!=!=/g, ''),
-          content: ''
-        };
-      }
-      // 日付の行をチェック（=?=?=で始まる）
-      else if (line.startsWith('=?=?=')) {
-        if (currentPost) {
-          currentPost.dateTime = line.replace(/=\?=\?=/g, '');
-        }
-      }
-      // 投稿内容の行
-      else if (line.includes('名無しさん＠おーぷん') && line.includes('<>')) {
-        const parts = line.split('<>');
-        if (parts.length >= 4 && currentPost) {
-          currentPost.author = parts[0];
-          currentPost.postId = parts[2];
-          currentPost.content = parts.slice(3).join('<>').trim();
-          
-          // 投稿IDから日時とIDを抽出
-          const idMatch = currentPost.postId.match(/(\d{2}\/\d{2}\/\d{2}\(.+?\) \d{2}:\d{2}:\d{2}) ID:(\w+)/);
-          if (idMatch) {
-            currentPost.postTime = idMatch[1];
-            currentPost.userId = idMatch[2];
-          }
-        }
-      }
-      // 継続するコンテンツ
-      else if (currentPost && line.trim() && !line.startsWith('=')) {
-        currentPost.content += '\n' + line;
-      }
     }
-    
-    // 最後のポストを追加
-    if (currentPost) {
-      posts.push(currentPost);
-    }
-    
-    return posts.filter(post => post.content && post.content.trim());
+    return threads;
   }
   
   async function fetchPosts() {
@@ -108,113 +133,156 @@
       document.getElementById('info').textContent = 'データを読み込み中...';
       
       const snapshot = await getDocs(collection(db, "aggregated_threads"));
-      
       if (snapshot.docs.length === 0) {
-        document.getElementById('results').textContent = 'データが見つかりません';
+        document.getElementById('info').textContent = 'データが見つかりません';
         return;
       }
       
       const doc = snapshot.docs[0];
       const data = doc.data();
-      originalData = data;
       
-      // コンテンツをパースして投稿に分割
-      allPosts = parseContentData(data.content);
+      allThreads = parseContentData(data.content);
       
-      // 情報表示を更新
       const lastUpdated = data.lastUpdated ? new Date(data.lastUpdated.seconds * 1000).toLocaleString('ja-JP') : '不明';
-      document.getElementById('info').innerHTML = `
-        <strong>データ情報:</strong> スレッド数: ${data.threadCount}, 投稿数: ${allPosts.length}, 最終更新: ${lastUpdated}
-      `;
-      
-      renderPosts(allPosts);
+      originalDataInfo = {
+        threadCount: allThreads.length,
+        postCount: allThreads.reduce((sum, t) => sum + t.posts.length, 0),
+        lastUpdated: lastUpdated
+      };
+
+      updateInfoPanel();
+      document.getElementById('results').innerHTML = '<p>検索ボックスにキーワードを入力して検索してください。</p>';
       
     } catch (err) {
-      document.getElementById('results').textContent = `エラー: ${err.message}`;
+      document.getElementById('info').textContent = `エラー: ${err.message}`;
       console.error(err);
     }
   }
-  
-  function renderPosts(posts) {
+
+  function updateInfoPanel(text = null) {
+      if (text) {
+          document.getElementById('info').innerHTML = text;
+      } else {
+          document.getElementById('info').innerHTML = `
+            <strong>データ情報:</strong> スレッド数: ${originalDataInfo.threadCount}, 
+            総投稿数: ${originalDataInfo.postCount}, 最終更新: ${originalDataInfo.lastUpdated}
+          `;
+      }
+  }
+
+  function highlightSearchTerm(text, term) {
+    if (!term || !text) return text;
+    // 特殊文字をエスケープ
+    const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escapedTerm})`, 'gi');
+    return text.replace(regex, '<span class="highlight">$1</span>');
+  }
+
+  function renderSearchResults(results, keyword) {
     const resultsDiv = document.getElementById('results');
     resultsDiv.innerHTML = '';
-    
-    if (posts.length === 0) {
-      resultsDiv.textContent = '検索条件に一致する投稿がありません';
-      return;
+
+    if (results.length === 0) {
+        resultsDiv.innerHTML = '<p>検索条件に一致するスレッドがありませんでした。</p>';
+        return;
     }
-    
-    posts.slice(0, 50).forEach((post, index) => { // 最初の50件のみ表示
-      const postDiv = document.createElement('div');
-      postDiv.className = 'post';
-      
-      postDiv.innerHTML = `
-        <div class="post-header">投稿 #${index + 1}</div>
-        <div class="post-meta">
-          <strong>${post.author || '名無し'}</strong> | 
-          時刻: ${post.postTime || '不明'} | 
-          ID: ${post.userId || '不明'}
-        </div>
-        <div class="post-content">${post.content || 'コンテンツなし'}</div>
-      `;
-      
-      resultsDiv.appendChild(postDiv);
+
+    results.forEach(thread => {
+        const threadDiv = document.createElement('div');
+        threadDiv.className = 'thread-result';
+
+        // ヘッダー（タイトルとヒット数）
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'thread-header';
+        headerDiv.innerHTML = `
+            <span class="thread-title">${highlightSearchTerm(thread.title, keyword)}</span>
+            <span class="match-count">${thread.matchedPosts.length}件のレスがヒット</span>
+        `;
+        
+        // 詳細部分（リンク、最終更新、ヒットしたレス）
+        const detailsDiv = document.createElement('div');
+        detailsDiv.className = 'thread-details';
+        detailsDiv.innerHTML = `
+            <div class="thread-meta">
+                <a href="${thread.link}" target="_blank" rel="noopener noreferrer">このスレッドへのリンク</a> | <strong>最終更新:</strong> ${thread.lastUpdated}
+            </div>
+        `;
+
+        thread.matchedPosts.forEach(post => {
+            const postDiv = document.createElement('div');
+            postDiv.className = 'post';
+            
+            const highlightedContent = highlightSearchTerm(post.content, keyword);
+            const highlightedAuthor = highlightSearchTerm(post.author, keyword);
+            const highlightedUserId = highlightSearchTerm(post.userId, keyword);
+            
+            postDiv.innerHTML = `
+                <div class="post-meta">
+                    <strong>${highlightedAuthor}</strong> | 
+                    時刻: ${post.postTime} | 
+                    ID: ${highlightedUserId}
+                </div>
+                <div class="post-content">${highlightedContent}</div>
+            `;
+            detailsDiv.appendChild(postDiv);
+        });
+
+        // クリックで詳細の表示/非表示を切り替え
+        headerDiv.addEventListener('click', () => {
+            const isHidden = detailsDiv.style.display === 'none' || detailsDiv.style.display === '';
+            detailsDiv.style.display = isHidden ? 'block' : 'none';
+        });
+
+        threadDiv.appendChild(headerDiv);
+        threadDiv.appendChild(detailsDiv);
+        resultsDiv.appendChild(threadDiv);
     });
-    
-    if (posts.length > 50) {
-      const moreDiv = document.createElement('div');
-      moreDiv.style.textAlign = 'center';
-      moreDiv.style.padding = '15px';
-      moreDiv.style.color = '#666';
-      moreDiv.textContent = `... 他 ${posts.length - 50} 件の投稿があります`;
-      resultsDiv.appendChild(moreDiv);
-    }
-  }
-  
-  function highlightSearchTerm(text, term) {
-    if (!term) return text;
-    const regex = new RegExp(`(${term})`, 'gi');
-    return text.replace(regex, '<span class="highlight">$1</span>');
   }
   
   function searchPosts() {
-    const keyword = document.getElementById('searchInput').value.toLowerCase().trim();
+    const keyword = document.getElementById('searchInput').value.trim();
     if (!keyword) {
-      renderPosts(allPosts);
+      clearSearch();
       return;
     }
-    
-    const filtered = allPosts.filter(post => {
-      return (
-        (post.author && post.author.toLowerCase().includes(keyword)) ||
-        (post.userId && post.userId.toLowerCase().includes(keyword)) ||
-        (post.content && post.content.toLowerCase().includes(keyword)) ||
-        (post.postTime && post.postTime.toLowerCase().includes(keyword))
-      );
+
+    const lowerKeyword = keyword.toLowerCase();
+    const searchResults = [];
+
+    allThreads.forEach(thread => {
+        const matchedPosts = thread.posts.filter(post => {
+            return (
+                (post.author && post.author.toLowerCase().includes(lowerKeyword)) ||
+                (post.userId && post.userId.toLowerCase().includes(lowerKeyword)) ||
+                (post.content && post.content.toLowerCase().includes(lowerKeyword))
+            );
+        });
+
+        if (matchedPosts.length > 0) {
+            searchResults.push({
+                ...thread,
+                matchedPosts: matchedPosts
+            });
+        }
     });
     
-    document.getElementById('info').innerHTML = `
-      <strong>検索結果:</strong> "${keyword}" に一致する投稿: ${filtered.length}件
-    `;
-    
-    renderPosts(filtered);
+    updateInfoPanel(`<strong>検索結果:</strong> "${keyword}" に一致するスレッド: ${searchResults.length}件`);
+    renderSearchResults(searchResults, keyword);
   }
   
   function clearSearch() {
     document.getElementById('searchInput').value = '';
-    renderPosts(allPosts);
-    if (originalData) {
-      const lastUpdated = originalData.lastUpdated ? new Date(originalData.lastUpdated.seconds * 1000).toLocaleString('ja-JP') : '不明';
-      document.getElementById('info').innerHTML = `
-        <strong>データ情報:</strong> スレッド数: ${originalData.threadCount}, 投稿数: ${allPosts.length}, 最終更新: ${lastUpdated}
-      `;
-    }
+    document.getElementById('results').innerHTML = '<p>検索ボックスにキーワードを入力して検索してください。</p>';
+    updateInfoPanel();
   }
   
   document.getElementById('searchBtn').addEventListener('click', searchPosts);
   document.getElementById('clearBtn').addEventListener('click', clearSearch);
   document.getElementById('searchInput').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') searchPosts();
+    if (e.key === 'Enter') {
+      e.preventDefault(); // フォームの送信を防止
+      searchPosts();
+    }
   });
   
   // ページ読み込み時にデータ取得
