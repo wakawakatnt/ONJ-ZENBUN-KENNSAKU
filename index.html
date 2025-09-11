@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONJ 全文検索</title>
+<title>ONJ 最新10件表示</title>
 <style>
   body { font-family: system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN',Meiryo,Arial; margin: 18px; }
   input { padding: 6px; width: 60%; }
@@ -17,7 +17,7 @@
 </head>
 <body>
 
-<h2>ONJ 全文検索</h2>
+<h2>ONJ 最新10件表示</h2>
 <input type="text" id="searchInput" placeholder="検索ワード">
 <button onclick="searchPosts()">検索</button>
 
@@ -31,7 +31,7 @@
     projectId: "onj-zenbun-kensaku",
     storageBucket: "onj-zenbun-kensaku.appspot.com",
     messagingSenderId: "171332002735",
-    appId: "1:171332002735:web:c8dcad3ae133300900855a", // あなたの appId
+    appId: "1:171332002735:web:c8dcad3ae133300900855a",
     measurementId: "G-DDHGB57HTW"
   };
   firebase.initializeApp(firebaseConfig);
@@ -41,7 +41,10 @@
 
   async function fetchPosts() {
     try {
-      const snapshot = await db.collection('posts').get();
+      const snapshot = await db.collection('posts')
+                               .orderBy('createdAt', 'desc') // 作成日時で最新順
+                               .limit(10) // 上から10件
+                               .get();
       allPosts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       renderPosts(allPosts);
     } catch (err) {
@@ -53,6 +56,10 @@
   function renderPosts(posts) {
     const resultsDiv = document.getElementById('results');
     resultsDiv.innerHTML = '';
+    if (posts.length === 0) {
+      resultsDiv.textContent = 'データが見つかりません';
+      return;
+    }
     posts.forEach(post => {
       const postDiv = document.createElement('div');
       postDiv.className = 'post';
@@ -75,7 +82,7 @@
     renderPosts(filtered);
   }
 
-  // ページ読み込み時に全件取得
+  // ページ読み込み時に上から10件取得
   fetchPosts();
 </script>
 
