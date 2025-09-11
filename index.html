@@ -88,7 +88,7 @@
           単純なクエリで最初の10件を取得します
         `);
         
-        const fallbackQuery = query(collection(db, "posts"), limit(10));
+        const fallbackQuery = query(collection(db, "latest"), limit(10));
         const fallbackSnapshot = await getDocs(fallbackQuery);
         allPosts = fallbackSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       }
