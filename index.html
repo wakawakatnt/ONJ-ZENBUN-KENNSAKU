@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONJ 最新10件表示</title>
+<title>ONJ 最新10件表示（モジュール式 v12）</title>
 <style>
   body { font-family: system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN',Meiryo,Arial; margin: 18px; }
   input { padding: 6px; width: 60%; }
@@ -11,40 +11,43 @@
   .post { border: 1px solid #ccc; border-radius: 6px; padding: 6px; margin: 6px 0; cursor: pointer; }
   .content { display: none; padding-top: 4px; white-space: pre-wrap; }
 </style>
-<!-- Firebase SDK -->
-<script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
 <h2>ONJ 最新10件表示</h2>
 <input type="text" id="searchInput" placeholder="検索ワード">
-<button onclick="searchPosts()">検索</button>
+<button id="searchBtn">検索</button>
 
 <div id="results"></div>
 
-<script>
-  // Firebase初期化
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+  import { getFirestore, collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+
+  // Firebase 初期化
   const firebaseConfig = {
     apiKey: "AIzaSyA2Z-JByRuaSv88nAj356nOh4CNgQb0_SY",
     authDomain: "onj-zenbun-kensaku.firebaseapp.com",
     projectId: "onj-zenbun-kensaku",
-    storageBucket: "onj-zenbun-kensaku.appspot.com",
+    storageBucket: "onj-zenbun-kensaku.firebasestorage.app",
     messagingSenderId: "171332002735",
     appId: "1:171332002735:web:c8dcad3ae133300900855a",
     measurementId: "G-DDHGB57HTW"
   };
-  firebase.initializeApp(firebaseConfig);
-  const db = firebase.firestore();
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
 
   let allPosts = [];
 
   async function fetchPosts() {
     try {
-      const snapshot = await db.collection('posts')
-                               .orderBy('createdAt', 'desc') // 作成日時で最新順
-                               .limit(10) // 上から10件
-                               .get();
+      const q = query(
+        collection(db, "posts"),
+        orderBy("createdAt", "desc"), // FirestoreにcreatedAtがある場合
+        limit(10)
+      );
+      const snapshot = await getDocs(q);
       allPosts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       renderPosts(allPosts);
     } catch (err) {
@@ -82,8 +85,11 @@
     renderPosts(filtered);
   }
 
-  // ページ読み込み時に上から10件取得
+  document.getElementById('searchBtn').addEventListener('click', searchPosts);
+
+  // ページ読み込み時に最新10件取得
   fetchPosts();
+
 </script>
 
 </body>
