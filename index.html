@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf--8">
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONJ 1掲示板データ検索</title>
+<title>ONJ 掲示板データ検索</title>
 <style>
   body { font-family: system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN',Meiryo,Arial; margin: 18px; line-height: 1.5; background-color: #f4f4f9; color: #333; }
   input { padding: 10px; width: 70%; margin-right: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 1em; }
@@ -206,18 +206,10 @@
       
       if (!cleanThreadContent) continue;
       
-      // =====【修正箇所】=====
-      // 投稿を分割する正規表現を改善。
-      // 「■」などで始まる名前（スペースを含む可能性も考慮）と、途中に記号を含む名前の両方に対応。
-      const postPattern = /(?=(?:名無しさん＠おーぷん|[▼▲★☆■][^<>]*?|[^\s<>]*?[▼▲★☆■][^\s<>]*?)<>)/;
-      let postStrings = cleanThreadContent.split(postPattern).filter(s => s.trim());
-      // =====【修正ここまで】=====
-      
-      // 上記パターンで分割できない場合の予備パターン
-      if (postStrings.length <= 1) {
-        const alternatePattern = /(?=.+?<>.+?<>\d{2}\/\d{2}\/\d{2})/;
-        postStrings = cleanThreadContent.split(alternatePattern).filter(s => s.trim());
-      }
+      // 【修正点】投稿の構造（名前<>日付ID<>）に基づいて分割する、より堅牢な正規表現に変更
+      // これにより、名前にHTMLタグが含まれていても正しく分割されます。
+      const postPattern = /(?=.+?<>[^<>]*?<>\d{2}\/\d{2}\/\d{2}\([^)]+\) \d{2}:\d{2}:\d{2} ID:)/;
+      const postStrings = cleanThreadContent.split(postPattern).filter(s => s.trim());
       
       if (postStrings.length === 0) continue;
 
@@ -253,11 +245,11 @@
           let extractedTitle = '';
           
           // <> で分割して最後の部分を確認
-          const contentParts = postContent.split('<>');
+          const contentTitleParts = postContent.split('<>');
           
-          if (contentParts.length > 1) {
+          if (contentTitleParts.length > 1) {
             // 最後の部分がタイトルの可能性が高い
-            let candidateTitle = contentParts[contentParts.length - 1].trim();
+            let candidateTitle = contentTitleParts[contentTitleParts.length - 1].trim();
             
             // HTMLタグを除去
             candidateTitle = candidateTitle.replace(/<[^>]+>/g, '').trim();
@@ -282,7 +274,7 @@
                 !candidateTitle.match(/^(test|テスト|確認)$/i)) { // 単純なテストワードではない
               extractedTitle = candidateTitle;
               // タイトル部分を除いた内容を投稿内容とする
-              postContent = contentParts.slice(0, -1).join('<>').trim();
+              postContent = contentTitleParts.slice(0, -1).join('<>').trim();
             }
           }
           
