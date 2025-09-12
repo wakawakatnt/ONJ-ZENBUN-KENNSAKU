@@ -125,34 +125,54 @@
   function parseContentData(content) {
     const threads = [];
     
-    // =!=!=で分割してスレッドブロックを取得
-    const threadBlocks = content.split('=!=!=').filter(block => block.trim());
-
-    for (const block of threadBlocks) {
-        const trimmedBlock = block.trim();
-        if (!trimmedBlock) continue;
+    // =!=!=を使って分割（スレッド区切り）
+    const parts = content.split('=!=!=').filter(part => part.trim());
+    
+    for (let i = 0; i < parts.length; i++) {
+        const part = parts[i].trim();
+        if (!part) continue;
         
-        // 最初の行がスレッドID
-        const lines = trimmedBlock.split('\n');
-        const threadId = lines[0].trim();
+        // 最初の部分は通常空文字またはヘッダーなので、2番目以降を処理
+        if (i === 0 && !part.match(/^\d+$/)) continue;
         
-        // スレッドIDが数字のみかチェック
-        if (!threadId || !/^\d+$/.test(threadId)) continue;
+        let threadId, threadContent;
+        
+        if (part.match(/^\d+$/)) {
+            // この部分がスレッドIDの場合、次の部分がコンテンツ
+            threadId = part;
+            if (i + 1 < parts.length) {
+                threadContent = parts[i + 1].trim();
+                i++; // 次のループをスキップ
+            } else {
+                continue; // コンテンツがない場合はスキップ
+            }
+        } else {
+            // 既存のロジックでスレッドIDとコンテンツを分離
+            const lines = part.split('\n');
+            const firstLine = lines[0].trim();
+            
+            if (firstLine.match(/^\d+$/)) {
+                threadId = firstLine;
+                threadContent = lines.slice(1).join('\n');
+            } else {
+                // スレッドIDが見つからない場合はスキップ
+                continue;
+            }
+        }
 
-        // 残りの部分を処理
-        const remainingContent = lines.slice(1).join('\n');
+        if (!threadId || !threadContent) continue;
         
         // =?=?=で区切られたタイムスタンプ部分を削除
-        const contentParts = remainingContent.split('=?=?=');
-        let threadContent = '';
+        const contentParts = threadContent.split('=?=?=');
+        let cleanThreadContent = '';
         if (contentParts.length >= 3) {
-          threadContent = contentParts.slice(2).join('=?=?=');
+          cleanThreadContent = contentParts.slice(2).join('=?=?=');
         } else {
-          threadContent = remainingContent;
+          cleanThreadContent = threadContent;
         }
         
         // 投稿を解析
-        const postStrings = threadContent.split(/(?=名無しさん＠おーぷん<><>)/).filter(s => s.trim());
+        const postStrings = cleanThreadContent.split(/(?=名無しさん＠おーぷん<><>)/).filter(s => s.trim());
         if (postStrings.length === 0) continue;
 
         const posts = [];
@@ -174,7 +194,7 @@
                 threadTitle = titleSplit[titleSplit.length - 1].trim().replace(/<br>/g, '\n').trim();
                 postContent = titleSplit.slice(0, -1).join(' <>').trim();
               } else {
-                // 従来のロジック
+                // 従来のロジック（<br>や改行で分割）
                 const contentParts = postContent.split(/<br>|\n/);
                 const nonEmptyParts = contentParts.filter(p => p.trim());
                 if (nonEmptyParts.length > 0) {
