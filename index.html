@@ -177,7 +177,7 @@
     return new Date(fullYear, parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute), parseInt(second));
   }
 
-  // 改善されたパース関数
+  // ### ここからが修正された関数です ###
   function parseContentData(content) {
     const threads = [];
     
@@ -207,85 +207,105 @@
       
       if (!cleanThreadContent) continue;
       
-      // 投稿を<>で分割してから再構成
-      const allParts = cleanThreadContent.split('<>');
+      // 【修正点1】投稿を分割する正規表現を改善
+      // 名前の開始パターン（「名無しさん」や特定の記号）の直前で分割する
+      const postPattern = /(?=(?:名無しさん＠おーぷん|[▼▲★☆■]))/;
+      let postStrings = cleanThreadContent.split(postPattern).filter(s => s.trim());
+      
+      if (postStrings.length === 0) continue;
+
       const posts = [];
       let threadTitle = "（タイトル不明）";
       let lastPostTime = null;
-      let currentPostData = [];
-      
-      for (let j = 0; j < allParts.length; j++) {
-        currentPostData.push(allParts[j]);
+
+      postStrings.forEach((postStr, index) => {
+        const postParts = postStr.split('<>');
+        if (postParts.length < 3) return;
+
+        const author = postParts[0].trim();
+        let emailOrSage = postParts[1] || '';
+        let dateTimeAndId = '';
+        let postContent = '';
         
-        // 投稿の完成を判定：日時とIDパターンが含まれ、次の投稿者名が存在する場合
-        const currentPart = allParts[j];
-        const hasDateTime = currentPart.match(/\d{2}\/\d{2}\/\d{2}\([^)]+\)\s+\d{2}:\d{2}:\d{2}\s+ID:\s*\S+/);
-        const nextPartIsAuthor = j + 1 < allParts.length && allParts[j + 1].trim().includes('名無しさん');
-        
-        if (hasDateTime && (nextPartIsAuthor || j === allParts.length - 1)) {
-          // 投稿データの処理
-          if (currentPostData.length >= 3) {
-            const author = currentPostData[0].trim();
-            let emailOrSage = currentPostData[1] || '';
-            let dateTimeAndId = '';
-            let postContent = '';
+        // sageがある場合とない場合を判定
+        if (postParts.length >= 4 && postParts[2].match(/\d{2}\/\d{2}\/\d{2}/)) {
+          // sage有り: author<>sage<>datetime<>content
+          dateTimeAndId = postParts[2];
+          postContent = postParts.slice(3).join('<>');
+        } else if (postParts.length >= 3 && postParts[1].match(/\d{2}\/\d{2}\/\d{2}/)) {
+          // sage無し: author<>datetime<>content
+          dateTimeAndId = postParts[1];
+          postContent = postParts.slice(2).join('<>');
+          emailOrSage = '';
+        } else {
+          return; // 形式が合わない場合はスキップ
+        }
+
+        // 最初の投稿からタイトルを抽出
+        if (index === 0 && postContent) {
+          let extractedTitle = '';
+          
+          // <> で分割して最後の部分を確認
+          const contentTitleParts = postContent.split('<>');
+          
+          if (contentTitleParts.length > 1) {
+            let candidateTitle = contentTitleParts[contentTitleParts.length - 1].trim();
             
-            // sage判定とデータ抽出
-            if (currentPostData.length >= 4 && currentPostData[2].match(/\d{2}\/\d{2}\/\d{2}/)) {
-              // sage有り: author<>sage<>datetime<>content...
-              dateTimeAndId = currentPostData[2];
-              postContent = currentPostData.slice(3).join('<>');
-            } else if (currentPostData.length >= 3 && currentPostData[1].match(/\d{2}\/\d{2}\/\d{2}/)) {
-              // sage無し: author<>datetime<>content...
-              dateTimeAndId = currentPostData[1];
-              postContent = currentPostData.slice(2).join('<>');
-              emailOrSage = '';
+            // 【修正点2】タイトルと次の投稿の著者が結合している場合、分離する
+            const ninjaPostStartIndex = candidateTitle.search(/[▼▲★☆■]/);
+            if (ninjaPostStartIndex !== -1) {
+                // 記号が見つかった場合、その手前までをタイトルとする
+                candidateTitle = candidateTitle.substring(0, ninjaPostStartIndex).trim();
             }
+
+            // HTMLタグを除去
+            candidateTitle = candidateTitle.replace(/<[^>]+>/g, '').trim();
             
-            const idMatch = dateTimeAndId.match(/(\d{2}\/\d{2}\/\d{2}\([^)]+\) \d{2}:\d{2}:\d{2}) ID:\s*(\S+)/);
-            if (idMatch) {
-              const postTime = idMatch[1];
-              const parsedTime = parseDateTime(postTime);
-              if (parsedTime) {
-                lastPostTime = parsedTime;
-              }
-              
-              // 最初の投稿からタイトルを抽出
-              if (posts.length === 0 && postContent) {
-                let extractedTitle = '';
-                
-                // 最後の<>区切りの後ろ部分からタイトルを抽出
-                const lines = postContent.split('\n');
-                for (const line of lines) {
-                  const cleanLine = line.replace(/<[^>]+>/g, '').trim();
-                  if (cleanLine && cleanLine.length >= 3 && cleanLine.length <= 100 && 
-                      !cleanLine.match(/^https?:\/\//) && !cleanLine.match(/^名無しさん/)) {
-                    extractedTitle = cleanLine;
-                    break;
-                  }
-                }
-                
-                if (extractedTitle) {
-                  threadTitle = extractedTitle;
-                }
-              }
-              
-              posts.push({
-                postNumber: posts.length + 1, // 正確なレス番号
-                author: author,
-                sage: emailOrSage === 'sage',
-                postTime: postTime,
-                postTimeDate: parsedTime,
-                userId: idMatch[2],
-                content: postContent.replace(/<br>/g, '\n').trim()
-              });
+            // フォントタグなどの残骸を除去
+            candidateTitle = candidateTitle.replace(/^[^>]*>/, '').trim();
+            
+            // 有効なタイトルかチェック
+            if (candidateTitle && candidateTitle.length >= 3) {
+              extractedTitle = candidateTitle;
+              // タイトル部分を除いた内容を投稿内容とする
+              postContent = contentTitleParts.slice(0, -1).join('<>').trim();
             }
           }
           
-          // 次の投稿のために初期化
-          currentPostData = [];
+          // それでもタイトルが取れない場合、投稿内容の最初の行から推測
+          if (!extractedTitle && postContent) {
+            const firstLine = postContent.split('\n')[0].trim();
+            const cleanFirstLine = firstLine.replace(/<[^>]+>/g, '').trim();
+            
+            if (cleanFirstLine.length >= 3 && cleanFirstLine.length <= 50 && !cleanFirstLine.match(/^https?:\/\//)) {
+              extractedTitle = cleanFirstLine;
+            }
+          }
+          
+          if (extractedTitle) {
+            threadTitle = extractedTitle;
+          }
         }
-      }
+        
+        const idMatch = dateTimeAndId.match(/(\d{2}\/\d{2}\/\d{2}\([^)]+\) \d{2}:\d{2}:\d{2}) ID:\s*(\S+)/);
+        if (idMatch) {
+          const postTime = idMatch[1];
+          const parsedTime = parseDateTime(postTime);
+          if (parsedTime) {
+            lastPostTime = parsedTime;
+          }
+          
+          posts.push({
+            postNumber: index + 1,
+            author: author,
+            sage: emailOrSage === 'sage',
+            postTime: postTime,
+            postTimeDate: parsedTime,
+            userId: idMatch[2],
+            content: postContent.replace(/<br>/g, '\n').trim()
+          });
+        }
+      });
       
       if (posts.length > 0) {
         threads.push({
@@ -301,6 +321,7 @@
     
     return threads;
   }
+  // ### ここまでが修正された関数です ###
   
   async function fetchAllDocuments() {
     try {
@@ -718,16 +739,6 @@
   // ソートオプションの変更イベントリスナー
   document.querySelectorAll('input[name="sortOrder"]').forEach(radio => {
     radio.addEventListener('change', applySorting);
-  });
-
-  // 【新機能1】検索範囲の変更イベントリスナー（自動再検索）
-  document.querySelectorAll('input[name="searchType"]').forEach(radio => {
-    radio.addEventListener('change', () => {
-      const keyword = document.getElementById('searchInput').value.trim();
-      if (keyword) {
-        searchPosts(); // キーワードがある場合のみ自動再検索
-      }
-    });
   });
 
   // ブラウザバック/フォワード対応
