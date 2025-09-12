@@ -207,126 +207,104 @@
       
       if (!cleanThreadContent) continue;
       
-      // 投稿を分割する正規表現
+      // 【修正点1】投稿を分割する正規表現を改善
+      // 名前の開始パターン（「名無しさん」や特定の記号）の直前で分割する
       const postPattern = /(?=(?:名無しさん＠おーぷん|[▼▲★☆■]))/;
       let postStrings = cleanThreadContent.split(postPattern).filter(s => s.trim());
       
       if (postStrings.length === 0) continue;
 
-      // --- 【修正点2】追記レスをマージするための新ロジック ---
-      // Pass 1: 分割された全ての断片を一時オブジェクトとしてパースする
-      const tempPosts = [];
-      postStrings.forEach(postStr => {
+      const posts = [];
+      let threadTitle = "（タイトル不明）";
+      let lastPostTime = null;
+
+      postStrings.forEach((postStr, index) => {
         const postParts = postStr.split('<>');
         if (postParts.length < 3) return;
 
         const author = postParts[0].trim();
         let emailOrSage = postParts[1] || '';
         let dateTimeAndId = '';
-        let rawContent = '';
+        let postContent = '';
         
+        // sageがある場合とない場合を判定
         if (postParts.length >= 4 && postParts[2].match(/\d{2}\/\d{2}\/\d{2}/)) {
+          // sage有り: author<>sage<>datetime<>content
           dateTimeAndId = postParts[2];
-          rawContent = postParts.slice(3).join('<>');
+          postContent = postParts.slice(3).join('<>');
         } else if (postParts.length >= 3 && postParts[1].match(/\d{2}\/\d{2}\/\d{2}/)) {
+          // sage無し: author<>datetime<>content
           dateTimeAndId = postParts[1];
-          rawContent = postParts.slice(2).join('<>');
+          postContent = postParts.slice(2).join('<>');
           emailOrSage = '';
         } else {
-          return;
+          return; // 形式が合わない場合はスキップ
         }
 
+        // 最初の投稿からタイトルを抽出
+        if (index === 0 && postContent) {
+          let extractedTitle = '';
+          
+          // <> で分割して最後の部分を確認
+          const contentTitleParts = postContent.split('<>');
+          
+          if (contentTitleParts.length > 1) {
+            let candidateTitle = contentTitleParts[contentTitleParts.length - 1].trim();
+            
+            // 【修正点2】タイトルと次の投稿の著者が結合している場合、分離する
+            const ninjaPostStartIndex = candidateTitle.search(/[▼▲★☆■]/);
+            if (ninjaPostStartIndex !== -1) {
+                // 記号が見つかった場合、その手前までをタイトルとする
+                candidateTitle = candidateTitle.substring(0, ninjaPostStartIndex).trim();
+            }
+
+            // HTMLタグを除去
+            candidateTitle = candidateTitle.replace(/<[^>]+>/g, '').trim();
+            
+            // フォントタグなどの残骸を除去
+            candidateTitle = candidateTitle.replace(/^[^>]*>/, '').trim();
+            
+            // 有効なタイトルかチェック
+            if (candidateTitle && candidateTitle.length >= 3) {
+              extractedTitle = candidateTitle;
+              // タイトル部分を除いた内容を投稿内容とする
+              postContent = contentTitleParts.slice(0, -1).join('<>').trim();
+            }
+          }
+          
+          // それでもタイトルが取れない場合、投稿内容の最初の行から推測
+          if (!extractedTitle && postContent) {
+            const firstLine = postContent.split('\n')[0].trim();
+            const cleanFirstLine = firstLine.replace(/<[^>]+>/g, '').trim();
+            
+            if (cleanFirstLine.length >= 3 && cleanFirstLine.length <= 50 && !cleanFirstLine.match(/^https?:\/\//)) {
+              extractedTitle = cleanFirstLine;
+            }
+          }
+          
+          if (extractedTitle) {
+            threadTitle = extractedTitle;
+          }
+        }
+        
         const idMatch = dateTimeAndId.match(/(\d{2}\/\d{2}\/\d{2}\([^)]+\) \d{2}:\d{2}:\d{2}) ID:\s*(\S+)/);
         if (idMatch) {
           const postTime = idMatch[1];
           const parsedTime = parseDateTime(postTime);
+          if (parsedTime) {
+            lastPostTime = parsedTime;
+          }
           
-          tempPosts.push({
+          posts.push({
+            postNumber: index + 1,
             author: author,
             sage: emailOrSage === 'sage',
             postTime: postTime,
             postTimeDate: parsedTime,
             userId: idMatch[2],
-            content: rawContent.trim() // この時点では<br>は保持
+            content: postContent.replace(/<br>/g, '\n').trim()
           });
         }
-      });
-
-      if (tempPosts.length === 0) continue;
-
-      // Pass 2: 追記レスを検出し、前のレスに内容をマージする
-      const finalPosts = [];
-      if (tempPosts.length > 0) {
-        finalPosts.push(tempPosts[0]); // 最初のレスは必ず追加
-        for (let j = 1; j < tempPosts.length; j++) {
-          const lastFinalPost = finalPosts[finalPosts.length - 1];
-          const currentTempPost = tempPosts[j];
-          
-          // 前のレスに追記開始タグがあり、追記終了タグがない場合にマージ
-          if (lastFinalPost.content.includes('class="add" color=red>※追記') && !lastFinalPost.content.includes('に追記(')) {
-            // ヘッダ情報と本文を前のレスのcontentに追加
-            lastFinalPost.content += `<br>${currentTempPost.author}<>${currentTempPost.postTime}<>${currentTempPost.content}`;
-            
-            // 最終更新日時も追記レスのもので更新する
-            if (currentTempPost.postTimeDate) {
-              lastFinalPost.postTimeDate = currentTempPost.postTimeDate;
-              lastFinalPost.postTime = currentTempPost.postTime;
-            }
-          } else {
-            finalPosts.push(currentTempPost);
-          }
-        }
-      }
-      
-      // Pass 3: マージ済みの投稿リストから最終的な投稿オブジェクトを生成
-      const posts = [];
-      let threadTitle = "（タイトル不明）";
-      let lastPostTime = null;
-
-      finalPosts.forEach((p, index) => {
-        // 最初の投稿からタイトルを抽出
-        if (index === 0 && p.content) {
-          let extractedTitle = '';
-          const contentTitleParts = p.content.split('<>');
-          if (contentTitleParts.length > 1) {
-            let candidateTitle = contentTitleParts[contentTitleParts.length - 1].trim();
-            const ninjaPostStartIndex = candidateTitle.search(/[▼▲★☆■]/);
-            if (ninjaPostStartIndex !== -1) {
-              candidateTitle = candidateTitle.substring(0, ninjaPostStartIndex).trim();
-            }
-            candidateTitle = candidateTitle.replace(/<[^>]+>/g, '').trim();
-            candidateTitle = candidateTitle.replace(/^[^>]*>/, '').trim();
-            if (candidateTitle && candidateTitle.length >= 3) {
-              extractedTitle = candidateTitle;
-              // タイトル部分をcontentから削除
-              p.content = contentTitleParts.slice(0, -1).join('<>').trim();
-            }
-          }
-          if (!extractedTitle && p.content) {
-            const firstLine = p.content.split(/<br>|\n/)[0].trim();
-            const cleanFirstLine = firstLine.replace(/<[^>]+>/g, '').trim();
-            if (cleanFirstLine.length >= 3 && cleanFirstLine.length <= 50 && !cleanFirstLine.match(/^https?:\/\//)) {
-              extractedTitle = cleanFirstLine;
-            }
-          }
-          if (extractedTitle) {
-            threadTitle = extractedTitle;
-          }
-        }
-
-        if (p.postTimeDate) {
-          lastPostTime = p.postTimeDate;
-        }
-
-        posts.push({
-          postNumber: index + 1, // レス番号を再設定
-          author: p.author,
-          sage: p.sage,
-          postTime: p.postTime,
-          postTimeDate: p.postTimeDate,
-          userId: p.userId,
-          content: p.content.replace(/<br>/g, '\n').trim() // 最後に<br>を改行に変換
-        });
       });
       
       if (posts.length > 0) {
@@ -443,8 +421,8 @@
     // "ID:"での検索かを判定（大文字小文字は区別しない）
     const idSearchMatch = term.match(/^id:\s*(.*)/i);
     if (idSearchMatch) {
-      // ID検索の場合は、入力されたID部分（大文字小文字保持）をハイライト対象にする
-      termToHighlight = idSearchMatch[1].trim().replace(/\s/g, '');
+        // ID検索の場合は、入力されたID部分（大文字小文字保持）をハイライト対象にする
+        termToHighlight = idSearchMatch[1].trim().replace(/\s/g, '');
     }
 
     if (!termToHighlight) return text;
@@ -584,62 +562,62 @@
     const idSearchMatch = searchType !== 'title' ? keyword.match(/^id:\s*(.*)/i) : null;
 
     if (idSearchMatch) {
-      // ID専用検索 (本文検索 or 全て検索)
-      const targetId = idSearchMatch[1].trim().replace(/\s/g, '');
-      if (targetId) {
-          threads.forEach(thread => {
-              const matchedPosts = thread.posts.filter(post => {
-                  if (!post.userId) return false;
-                  // 文字数によって検索方法を切り替え (大文字小文字を区別)
-                  return targetId.length < 4 
-                      ? post.userId.startsWith(targetId) 
-                      : post.userId.includes(targetId);
-              });
-              if (matchedPosts.length > 0) {
-                  searchResults.push({ ...thread, matchedPosts, documentName });
-              }
-          });
-      }
+        // ID専用検索 (本文検索 or 全て検索)
+        const targetId = idSearchMatch[1].trim().replace(/\s/g, '');
+        if (targetId) {
+            threads.forEach(thread => {
+                const matchedPosts = thread.posts.filter(post => {
+                    if (!post.userId) return false;
+                    // 文字数によって検索方法を切り替え (大文字小文字を区別)
+                    return targetId.length < 4 
+                        ? post.userId.startsWith(targetId) 
+                        : post.userId.includes(targetId);
+                });
+                if (matchedPosts.length > 0) {
+                    searchResults.push({ ...thread, matchedPosts, documentName });
+                }
+            });
+        }
     } else {
-      // 通常検索
-      const keywordForIdSearch = lowerKeyword.replace(/\s/g, '');
+        // 通常検索
+        const keywordForIdSearch = lowerKeyword.replace(/\s/g, '');
 
-      threads.forEach(thread => {
-          let postsMatchingKeyword = [];
-          let titleMatches = false;
+        threads.forEach(thread => {
+            let postsMatchingKeyword = [];
+            let titleMatches = false;
 
-          // 検索タイプに応じて検索対象を切り替え
-          if (searchType === 'body' || searchType === 'all') {
-              postsMatchingKeyword = thread.posts.filter(post => 
-                  (post.author && post.author.toLowerCase().includes(lowerKeyword)) ||
-                  (post.userId && post.userId.toLowerCase().includes(keywordForIdSearch)) ||
-                  (post.content && post.content.toLowerCase().includes(lowerKeyword))
-              );
-          }
+            // 検索タイプに応じて検索対象を切り替え
+            if (searchType === 'body' || searchType === 'all') {
+                postsMatchingKeyword = thread.posts.filter(post => 
+                    (post.author && post.author.toLowerCase().includes(lowerKeyword)) ||
+                    (post.userId && post.userId.toLowerCase().includes(keywordForIdSearch)) ||
+                    (post.content && post.content.toLowerCase().includes(lowerKeyword))
+                );
+            }
 
-          if (searchType === 'title' || searchType === 'all') {
-              titleMatches = thread.title.toLowerCase().includes(lowerKeyword);
-          }
+            if (searchType === 'title' || searchType === 'all') {
+                titleMatches = thread.title.toLowerCase().includes(lowerKeyword);
+            }
 
-          // レスかタイトルのいずれかがヒットした場合
-          if (postsMatchingKeyword.length > 0 || titleMatches) {
-              let finalMatchedPosts = [...postsMatchingKeyword];
+            // レスかタイトルのいずれかがヒットした場合
+            if (postsMatchingKeyword.length > 0 || titleMatches) {
+                let finalMatchedPosts = [...postsMatchingKeyword];
 
-              // タイトルがヒットした場合、1番目のレスがまだ結果に含まれていなければ追加
-              if (titleMatches && thread.posts.length > 0) {
-                  const firstPost = thread.posts[0];
-                  // 既に本文検索でヒットしている場合を除き、先頭に追加する
-                  if (!finalMatchedPosts.some(p => p.postNumber === firstPost.postNumber)) {
-                      finalMatchedPosts.unshift(firstPost);
-                  }
-              }
-              
-              // ヒットした投稿がなければ結果に追加しない
-              if (finalMatchedPosts.length > 0) {
-                  searchResults.push({ ...thread, matchedPosts: finalMatchedPosts, documentName });
-              }
-          }
-      });
+                // タイトルがヒットした場合、1番目のレスがまだ結果に含まれていなければ追加
+                if (titleMatches && thread.posts.length > 0) {
+                    const firstPost = thread.posts[0];
+                    // 既に本文検索でヒットしている場合を除き、先頭に追加する
+                    if (!finalMatchedPosts.some(p => p.postNumber === firstPost.postNumber)) {
+                        finalMatchedPosts.unshift(firstPost);
+                    }
+                }
+                
+                // ヒットした投稿がなければ結果に追加しない
+                if (finalMatchedPosts.length > 0) {
+                    searchResults.push({ ...thread, matchedPosts: finalMatchedPosts, documentName });
+                }
+            }
+        });
     }
 
     return searchResults;
@@ -756,11 +734,6 @@
       e.preventDefault();
       searchPosts();
     }
-  });
-
-  // 【修正点1】検索範囲の変更イベントリスナー
-  document.querySelectorAll('input[name="searchType"]').forEach(radio => {
-    radio.addEventListener('change', searchPosts);
   });
 
   // ソートオプションの変更イベントリスナー
