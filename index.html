@@ -340,18 +340,21 @@
   function highlightSearchTerm(text, term) {
     if (!term || !text) return text;
     
-    // ID専用検索の場合、"ID:"を除いた部分のみをハイライトする
     const lowerTerm = term.toLowerCase();
     let termToHighlight = lowerTerm;
-    const idSearchMatch = lowerTerm.match(/^id:\s*(.*)/);
+
+    // "ID:"での検索かを判定（大文字小文字は区別しない）
+    const idSearchMatch = term.match(/^id:\s*(.*)/i);
     if (idSearchMatch) {
+        // ID検索の場合は、入力されたID部分（大文字小文字保持）をハイライト対象にする
         termToHighlight = idSearchMatch[1].trim().replace(/\s/g, '');
     }
 
     if (!termToHighlight) return text;
 
     const escapedTerm = termToHighlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`(${escapedTerm})`, 'gi');
+    // giフラグ(全体、大文字小文字区別なし)だと大文字小文字が違う場合にハイライトされてしまうため、gフラグ(全体)のみ使用
+    const regex = new RegExp(`(${escapedTerm})`, 'g');
     return text.replace(regex, '<span class="highlight">$1</span>');
   }
 
@@ -432,17 +435,18 @@
     const lowerKeyword = keyword.toLowerCase();
     const searchResults = [];
 
-    // "ID:"で始まるかチェック（前後の空白は無視）
-    const idSearchMatch = lowerKeyword.match(/^id:\s*(.*)/);
+    // "ID:"で始まるかチェック（大文字小文字は区別しない `i` フラグ）
+    const idSearchMatch = keyword.match(/^id:\s*(.*)/i);
 
     if (idSearchMatch) {
         // ID専用検索の場合
+        // ★改良点: 元の`keyword`からID部分を抽出し、大文字小文字を保持
         const targetId = idSearchMatch[1].trim().replace(/\s/g, '');
         if (targetId) {
             threads.forEach(thread => {
                 const matchedPosts = thread.posts.filter(post => 
-                    // ★改良点: 前方一致(.startsWith)に変更
-                    post.userId && post.userId.toLowerCase().startsWith(targetId)
+                    // ★改良点: .toLowerCase()を削除し、大文字小文字を区別して完全一致(===)で比較
+                    post.userId && post.userId === targetId
                 );
                 if (matchedPosts.length > 0) {
                     const result = { ...thread, matchedPosts: matchedPosts };
@@ -542,6 +546,7 @@
   // ★★★ ここを改良しました (URL共有ボタン) ★★★
   function shareUrl() {
     const shareButton = document.getElementById('shareBtn');
+    const originalText = shareButton.textContent;
     const keyword = document.getElementById('searchInput').value.trim();
     
     const url = new URL(window.location);
@@ -557,7 +562,7 @@
       // 成功したらボタンのテキストを変更し、2秒後に戻す
       shareButton.textContent = 'コピー完了';
       setTimeout(() => {
-        shareButton.textContent = 'URL共有';
+        shareButton.textContent = originalText;
       }, 2000);
     }).catch(() => {
       // 失敗した場合のフォールバック
