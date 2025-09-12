@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf--8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONJ 掲示板データ検索</title>
+<title>ONJ 1掲示板データ検索</title>
 <style>
   body { font-family: system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN',Meiryo,Arial; margin: 18px; line-height: 1.5; background-color: #f4f4f9; color: #333; }
   input { padding: 10px; width: 70%; margin-right: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 1em; }
@@ -206,9 +206,12 @@
       
       if (!cleanThreadContent) continue;
       
-      // 【修正点】投稿を分割する正規表現を、より厳密なヘッダ構造（名前<>...>日付）にマッチするように変更
-      const postPattern = /(?=(?:名無しさん＠おーぷん|[^\s<>]*?[▼▲★☆■][^\s<>]*?)<>[^<>]*?<>\d{2}\/\d{2}\/\d{2})/;
+      // =====【修正箇所】=====
+      // 投稿を分割する正規表現を改善。
+      // 「■」などで始まる名前（スペースを含む可能性も考慮）と、途中に記号を含む名前の両方に対応。
+      const postPattern = /(?=(?:名無しさん＠おーぷん|[▼▲★☆■][^<>]*?|[^\s<>]*?[▼▲★☆■][^\s<>]*?)<>)/;
       let postStrings = cleanThreadContent.split(postPattern).filter(s => s.trim());
+      // =====【修正ここまで】=====
       
       // 上記パターンで分割できない場合の予備パターン
       if (postStrings.length <= 1) {
