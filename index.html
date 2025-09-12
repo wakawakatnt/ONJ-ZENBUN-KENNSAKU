@@ -417,9 +417,10 @@
             const highlightedContent = highlightSearchTerm(post.content, keyword);
             const highlightedAuthor = highlightSearchTerm(post.author, keyword);
             const highlightedUserId = highlightSearchTerm(post.userId, keyword);
+            const sageIndicator = post.sage ? ' <span style="color: #888; font-size: 0.9em;">[sage]</span>' : '';
             postDiv.innerHTML = `
                 <div class="post-meta">
-                    <strong>${highlightedAuthor}</strong> | 時刻: ${post.postTime} | ID: ${highlightedUserId}
+                    <strong>${highlightedAuthor}</strong>${sageIndicator} | 時刻: ${post.postTime} | ID: ${highlightedUserId}
                 </div>
                 <div class="post-content">${highlightedContent}</div>
             `;
