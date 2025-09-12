@@ -171,8 +171,17 @@
           cleanThreadContent = threadContent;
         }
         
-        // 投稿を解析
-        const postStrings = cleanThreadContent.split(/(?=名無しさん＠おーぷん<><>)/).filter(s => s.trim());
+        // より柔軟な投稿分割のパターンを使用
+        // 名無しさん@おーぷん または コテハン名（▼、▲等を含む）で分割
+        const postPattern = /(?=(?:名無しさん＠おーぷん|.+?[▼▲★☆].*?)<>)/;
+        const postStrings = cleanThreadContent.split(postPattern).filter(s => s.trim());
+        
+        // もし上記パターンでうまく分割できない場合は、より単純なパターンを試す
+        if (postStrings.length === 0) {
+            const alternatePattern = /(?=.+?<>.+?<>\d{2}\/\d{2}\/\d{2}\(.+?\) \d{2}:\d{2}:\d{2})/;
+            postStrings.push(...cleanThreadContent.split(alternatePattern).filter(s => s.trim()));
+        }
+        
         if (postStrings.length === 0) continue;
 
         const posts = [];
@@ -180,34 +189,67 @@
 
         postStrings.forEach((postStr, index) => {
             const parts = postStr.split('<>');
-            if (parts.length < 4) return;
+            if (parts.length < 3) return;
 
             const author = parts[0];
-            const postDetails = parts[2];
-            let postContent = parts.slice(3).join('<>');
+            let emailOrSage = parts[1] || '';  // sage や メールアドレス
+            let postDetails = '';
+            let postContent = '';
+            
+            // sage が含まれている場合の処理
+            if (parts.length >= 4) {
+                postDetails = parts[2];
+                postContent = parts.slice(3).join('<>');
+            } else {
+                // sage がない場合
+                postDetails = parts[1];
+                postContent = parts.slice(2).join('<>');
+            }
 
-            // 最初のレスからタイトルを抽出
-            if (index === 0) {
-              // " <>"で分割して最後の部分をタイトルとする
+            // 最初のレスからタイトルを抽出（より堅牢な方法）
+            if (index === 0 && postContent) {
+              // 様々なパターンでタイトルを抽出
+              let extractedTitle = '';
+              
+              // パターン1: " <>" で分割して最後の部分
               const titleSplit = postContent.split(' <>');
               if (titleSplit.length > 1) {
-                threadTitle = titleSplit[titleSplit.length - 1].trim().replace(/<br>/g, '\n').trim();
-                postContent = titleSplit.slice(0, -1).join(' <>').trim();
+                extractedTitle = titleSplit[titleSplit.length - 1].trim();
               } else {
-                // 従来のロジック（<br>や改行で分割）
-                const contentParts = postContent.split(/<br>|\n/);
-                const nonEmptyParts = contentParts.filter(p => p.trim());
-                if (nonEmptyParts.length > 0) {
-                  threadTitle = nonEmptyParts[nonEmptyParts.length - 1].trim();
+                // パターン2: 改行やbrタグで分割して最後の非空行
+                const contentLines = postContent.split(/<br>|\n/);
+                const nonEmptyLines = contentLines.filter(line => line.trim());
+                if (nonEmptyLines.length > 0) {
+                  extractedTitle = nonEmptyLines[nonEmptyLines.length - 1].trim();
+                }
+              }
+              
+              // パターン3: URLや特殊文字を除去してタイトル部分を抽出
+              if (extractedTitle) {
+                // URLパターンを除去
+                extractedTitle = extractedTitle.replace(/https?:\/\/[^\s<>]+/g, '').trim();
+                // 先頭の「前スレ」などを除去
+                extractedTitle = extractedTitle.replace(/^前スレ\s*/g, '').trim();
+                // 特殊コマンドを除去
+                extractedTitle = extractedTitle.replace(/!nopic\s*★[^<>]*$/g, '').trim();
+                
+                if (extractedTitle && extractedTitle.length > 0 && extractedTitle !== postContent.replace(/<br>/g, '\n').trim()) {
+                  threadTitle = extractedTitle;
+                  // タイトル部分を投稿内容から除去
+                  const titleIndex = postContent.lastIndexOf(extractedTitle);
+                  if (titleIndex > -1) {
+                    postContent = postContent.substring(0, titleIndex).trim();
+                  }
                 }
               }
             }
             
-            // 日時とIDを抽出
+            // 日時とIDを抽出（より柔軟なパターンマッチング）
             const idMatch = postDetails.match(/(\d{2}\/\d{2}\/\d{2}\(.+?\) \d{2}:\d{2}:\d{2}) ID:(\S+)/);
             if (idMatch) {
                 posts.push({
                     author: author.trim(),
+                    sage: emailOrSage === 'sage',
                     postTime: idMatch[1],
                     userId: idMatch[2],
                     content: postContent.replace(/<br>/g, '\n').trim()
