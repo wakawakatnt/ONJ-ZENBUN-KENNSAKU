@@ -237,7 +237,7 @@
         threads.push({
           id: threadId,
           title: threadTitle,
-          link: `https://hayabusa.open2ch.net/test/read.cgi/livejupiter/${threadId}/`,
+          link: `https://hayabusa.open2ch.net/test/read/cgi/livejupiter/${threadId}/`,
           posts: posts,
           lastUpdated: posts[posts.length - 1].postTime
         });
@@ -340,8 +340,7 @@
   function highlightSearchTerm(text, term) {
     if (!term || !text) return text;
     
-    const lowerTerm = term.toLowerCase();
-    let termToHighlight = lowerTerm;
+    let termToHighlight = term;
 
     // "ID:"での検索かを判定（大文字小文字は区別しない）
     const idSearchMatch = term.match(/^id:\s*(.*)/i);
@@ -352,9 +351,11 @@
 
     if (!termToHighlight) return text;
 
+    // 特殊文字をエスケープ
     const escapedTerm = termToHighlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // giフラグ(全体、大文字小文字区別なし)だと大文字小文字が違う場合にハイライトされてしまうため、gフラグ(全体)のみ使用
+    // gフラグ(全体)のみ使用し、大文字小文字を区別してハイライト
     const regex = new RegExp(`(${escapedTerm})`, 'g');
+    
     return text.replace(regex, '<span class="highlight">$1</span>');
   }
 
@@ -440,14 +441,22 @@
 
     if (idSearchMatch) {
         // ID専用検索の場合
-        // ★改良点: 元の`keyword`からID部分を抽出し、大文字小文字を保持
         const targetId = idSearchMatch[1].trim().replace(/\s/g, '');
         if (targetId) {
             threads.forEach(thread => {
-                const matchedPosts = thread.posts.filter(post => 
-                    // ★改良点: .toLowerCase()を削除し、大文字小文字を区別して完全一致(===)で比較
-                    post.userId && post.userId === targetId
-                );
+                const matchedPosts = thread.posts.filter(post => {
+                    if (!post.userId) return false;
+                    
+                    // 文字数によって検索方法を切り替える
+                    if (targetId.length < 4) {
+                        // 4文字未満: 大文字小文字を区別する前方一致
+                        return post.userId.startsWith(targetId);
+                    } else {
+                        // 4文字以上: 大文字小文字を区別する部分一致
+                        return post.userId.includes(targetId);
+                    }
+                });
+
                 if (matchedPosts.length > 0) {
                     const result = { ...thread, matchedPosts: matchedPosts };
                     if (documentName) {
@@ -543,7 +552,6 @@
     }
   }
 
-  // ★★★ ここを改良しました (URL共有ボタン) ★★★
   function shareUrl() {
     const shareButton = document.getElementById('shareBtn');
     const originalText = shareButton.textContent;
