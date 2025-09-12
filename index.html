@@ -16,9 +16,6 @@
   #shareBtn { background-color: #ff9800; }
   #shareBtn:hover { background-color: #f57c00; }
   .controls { margin-bottom: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .search-mode { margin-bottom: 15px; }
-  .search-mode label { margin-right: 20px; display: inline-flex; align-items: center; gap: 5px; }
-  .search-mode input[type="radio"] { margin-right: 5px; }
   .info { background: #e3f2fd; padding: 12px; margin-bottom: 20px; border-radius: 6px; border-left: 5px solid #1976d2; }
 
   /* ドキュメント一覧のスタイル */
@@ -72,17 +69,11 @@
     input { width: 100%; margin-right: 0; margin-bottom: 10px; }
     .document-item { flex-direction: column; align-items: flex-start; gap: 8px; }
     .document-info { flex-direction: column; gap: 5px; }
-    .search-mode label { margin-right: 10px; margin-bottom: 10px; }
   }
 </style>
 </head>
 <body>
 <h2>ONJ 掲示板データ検索システム</h2>
-
-<div class="search-mode">
-  <label><input type="radio" name="searchMode" value="all" checked> 全ドキュメントから検索</label>
-  <label><input type="radio" name="searchMode" value="current"> 現在のドキュメントのみ</label>
-</div>
 
 <div class="controls">
   <input type="text" id="searchInput" placeholder="検索ワード（名前、ID、投稿内容）">
@@ -120,10 +111,7 @@
   
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  let allThreads = [];
   let allDocuments = [];
-  let currentDocument = null;
-  let originalDataInfo = {};
   let allDocumentThreads = new Map(); // ドキュメントID -> スレッドデータのマップ
 
   function formatBytes(bytes) {
@@ -136,7 +124,9 @@
 
   function parseContentData(content) {
     const threads = [];
-    const threadBlocks = content.split('=!=!=');
+    
+    // =!=!=で分割してスレッドブロックを取得
+    const threadBlocks = content.split('=!=!=').filter(block => block.trim());
 
     for (const block of threadBlocks) {
         const trimmedBlock = block.trim();
@@ -144,10 +134,24 @@
         
         // 最初の行がスレッドID
         const lines = trimmedBlock.split('\n');
-        const threadId = lines.shift().trim();
-        if (!threadId || !/^\d+$/.test(threadId)) continue; // IDが数字でなければスキップ
+        const threadId = lines[0].trim();
+        
+        // スレッドIDが数字のみかチェック
+        if (!threadId || !/^\d+$/.test(threadId)) continue;
 
-        const threadContent = lines.join('\n');
+        // 残りの部分を処理
+        const remainingContent = lines.slice(1).join('\n');
+        
+        // =?=?=で区切られたタイムスタンプ部分を削除
+        const contentParts = remainingContent.split('=?=?=');
+        let threadContent = '';
+        if (contentParts.length >= 3) {
+          threadContent = contentParts.slice(2).join('=?=?=');
+        } else {
+          threadContent = remainingContent;
+        }
+        
+        // 投稿を解析
         const postStrings = threadContent.split(/(?=名無しさん＠おーぷん<><>)/).filter(s => s.trim());
         if (postStrings.length === 0) continue;
 
@@ -164,19 +168,22 @@
 
             // 最初のレスからタイトルを抽出
             if (index === 0) {
-              // "本文 <> タイトル" の形式をチェック
+              // " <>"で分割して最後の部分をタイトルとする
               const titleSplit = postContent.split(' <>');
               if (titleSplit.length > 1) {
-                // 最後の要素をタイトルとし、残りを本文とする
-                threadTitle = titleSplit.pop().trim().replace(/<br>/g, '\n').trim();
-                postContent = titleSplit.join(' <>').trim();
+                threadTitle = titleSplit[titleSplit.length - 1].trim().replace(/<br>/g, '\n').trim();
+                postContent = titleSplit.slice(0, -1).join(' <>').trim();
               } else {
-                // 上記形式でない場合、従来のロジックでタイトルを推測
+                // 従来のロジック
                 const contentParts = postContent.split(/<br>|\n/);
-                threadTitle = contentParts.filter(p => p.trim()).pop() || '（タイトル不明）';
+                const nonEmptyParts = contentParts.filter(p => p.trim());
+                if (nonEmptyParts.length > 0) {
+                  threadTitle = nonEmptyParts[nonEmptyParts.length - 1].trim();
+                }
               }
             }
             
+            // 日時とIDを抽出
             const idMatch = postDetails.match(/(\d{2}\/\d{2}\/\d{2}\(.+?\) \d{2}:\d{2}:\d{2}) ID:(\S+)/);
             if (idMatch) {
                 posts.push({
@@ -236,11 +243,7 @@
       allDocuments.sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
       
       renderDocumentsList();
-      
-      // 最初のドキュメントを自動選択
-      if (allDocuments.length > 0) {
-        loadDocument(allDocuments[0]);
-      }
+      updateInfoPanel();
 
       // URLパラメータから検索クエリを取得して実行
       checkUrlParams();
@@ -261,9 +264,6 @@
     allDocuments.forEach(doc => {
       const docDiv = document.createElement('div');
       docDiv.className = 'document-item';
-      if (currentDocument && currentDocument.id === doc.id) {
-        docDiv.classList.add('active-document');
-      }
       
       docDiv.innerHTML = `
         <div class="document-name">${doc.name}</div>
@@ -274,30 +274,8 @@
         </div>
       `;
       
-      docDiv.addEventListener('click', () => {
-        loadDocument(doc);
-        toggleDocumentsList();
-      });
-      
       documentsContent.appendChild(docDiv);
     });
-  }
-
-  function loadDocument(doc) {
-    currentDocument = doc;
-    allThreads = allDocumentThreads.get(doc.id) || [];
-    
-    originalDataInfo = {
-      documentName: doc.name,
-      documentSize: formatBytes(doc.size),
-      threadCount: doc.threadCount,
-      postCount: doc.postCount,
-      lastUpdated: doc.lastUpdated
-    };
-
-    updateInfoPanel();
-    document.getElementById('results').innerHTML = '<p>検索ボックスにキーワードを入力して検索してください。</p>';
-    renderDocumentsList(); // アクティブ状態を更新
   }
 
   function toggleDocumentsList() {
@@ -309,25 +287,14 @@
   function updateInfoPanel(text = null) {
     if (text) {
         document.getElementById('info').innerHTML = text;
-    } else if (originalDataInfo.documentName) {
-        const searchMode = document.querySelector('input[name="searchMode"]:checked').value;
-        if (searchMode === 'all') {
-            const totalThreads = Array.from(allDocumentThreads.values()).reduce((sum, threads) => sum + threads.length, 0);
-            const totalPosts = Array.from(allDocumentThreads.values()).reduce((sum, threads) => sum + threads.reduce((s, t) => s + t.posts.length, 0), 0);
-            document.getElementById('info').innerHTML = `
-              <strong>検索対象:</strong> 全ドキュメント (${allDocuments.length}件) | 
-              <strong>総スレッド数:</strong> ${totalThreads} | 
-              <strong>総投稿数:</strong> ${totalPosts} | 
-              <strong>現在表示:</strong> ${originalDataInfo.documentName}
-            `;
-        } else {
-            document.getElementById('info').innerHTML = `
-              <strong>現在のドキュメント:</strong> ${originalDataInfo.documentName} (${originalDataInfo.documentSize}) | 
-              <strong>スレッド数:</strong> ${originalDataInfo.threadCount} | 
-              <strong>総投稿数:</strong> ${originalDataInfo.postCount} | 
-              <strong>最終更新:</strong> ${originalDataInfo.lastUpdated}
-            `;
-        }
+    } else if (allDocuments.length > 0) {
+        const totalThreads = Array.from(allDocumentThreads.values()).reduce((sum, threads) => sum + threads.length, 0);
+        const totalPosts = Array.from(allDocumentThreads.values()).reduce((sum, threads) => sum + threads.reduce((s, t) => s + t.posts.length, 0), 0);
+        document.getElementById('info').innerHTML = `
+          <strong>検索対象:</strong> 全ドキュメント (${allDocuments.length}件) | 
+          <strong>総スレッド数:</strong> ${totalThreads} | 
+          <strong>総投稿数:</strong> ${totalPosts}
+        `;
     }
   }
 
@@ -351,12 +318,10 @@
 
     // 検索結果サマリーを表示
     const totalMatches = results.reduce((sum, r) => sum + r.matchedPosts.length, 0);
-    const searchMode = document.querySelector('input[name="searchMode"]:checked').value;
-    const searchScope = searchMode === 'all' ? `全${allDocuments.length}ドキュメント` : `ドキュメント: ${originalDataInfo.documentName}`;
     
     summaryDiv.innerHTML = `
       <strong>検索結果:</strong> "${keyword}" | 
-      <strong>対象:</strong> ${searchScope} | 
+      <strong>対象:</strong> 全${allDocuments.length}ドキュメント | 
       <strong>ヒット:</strong> ${results.length}スレッド, ${totalMatches}投稿
     `;
     summaryDiv.style.display = 'block';
@@ -440,46 +405,32 @@
       return;
     }
 
-    const searchMode = document.querySelector('input[name="searchMode"]:checked').value;
-    let searchResults = [];
+    if (allDocumentThreads.size === 0) {
+      updateInfoPanel('<span style="color: #c0392b;">データが読み込まれていません。しばらくお待ちください。</span>');
+      return;
+    }
 
-    if (searchMode === 'all') {
-      // 全ドキュメントから検索
-      if (allDocumentThreads.size === 0) {
-        updateInfoPanel('<span style="color: #c0392b;">データが読み込まれていません。しばらくお待ちください。</span>');
-        return;
-      }
-
-      document.getElementById('results').innerHTML = '<div class="loading">全ドキュメントを検索中...</div>';
+    document.getElementById('results').innerHTML = '<div class="loading">全ドキュメントを検索中...</div>';
+    
+    // 少し遅延を入れてUIの更新を確実にする
+    setTimeout(() => {
+      let searchResults = [];
       
-      // 少し遅延を入れてUIの更新を確実にする
-      setTimeout(() => {
-        allDocumentThreads.forEach((threads, docId) => {
-          const docResults = searchInThreads(threads, keyword, docId);
-          searchResults.push(...docResults);
-        });
+      allDocumentThreads.forEach((threads, docId) => {
+        const docResults = searchInThreads(threads, keyword, docId);
+        searchResults.push(...docResults);
+      });
 
-        // 結果をドキュメント名でソート
-        searchResults.sort((a, b) => {
-          const nameA = a.documentName || '';
-          const nameB = b.documentName || '';
-          return nameA.localeCompare(nameB, undefined, {numeric: true});
-        });
+      // 結果をドキュメント名でソート
+      searchResults.sort((a, b) => {
+        const nameA = a.documentName || '';
+        const nameB = b.documentName || '';
+        return nameA.localeCompare(nameB, undefined, {numeric: true});
+      });
 
-        renderSearchResults(searchResults, keyword);
-        updateUrlParams(keyword);
-      }, 100);
-    } else {
-      // 現在のドキュメントのみ検索
-      if (allThreads.length === 0) {
-        updateInfoPanel('<span style="color: #c0392b;">データが読み込まれていません。しばらくお待ちください。</span>');
-        return;
-      }
-
-      searchResults = searchInThreads(allThreads, keyword);
       renderSearchResults(searchResults, keyword);
       updateUrlParams(keyword);
-    }
+    }, 100);
   }
   
   function clearSearch() {
@@ -520,18 +471,11 @@
     url.searchParams.set('search', keyword);
     const shareUrl = url.toString();
 
-    if (navigator.share) {
-      navigator.share({
-        title: `ONJ掲示板検索: ${keyword}`,
-        url: shareUrl
-      }).catch(console.error);
-    } else {
-      navigator.clipboard.writeText(shareUrl).then(() => {
-        alert('URLをクリップボードにコピーしました！');
-      }).catch(() => {
-        prompt('以下のURLをコピーしてください:', shareUrl);
-      });
-    }
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      alert('URLをクリップボードにコピーしました！');
+    }).catch(() => {
+      prompt('以下のURLをコピーしてください:', shareUrl);
+    });
   }
   
   // イベントリスナーの設定
@@ -544,11 +488,6 @@
       e.preventDefault();
       searchPosts();
     }
-  });
-
-  // 検索モード変更時の処理
-  document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
-    radio.addEventListener('change', updateInfoPanel);
   });
 
   // ブラウザバック/フォワード対応
