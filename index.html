@@ -18,6 +18,11 @@
   .controls { margin-bottom: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .info { background: #e3f2fd; padding: 12px; margin-bottom: 20px; border-radius: 6px; border-left: 5px solid #1976d2; }
 
+  /* ソートオプション */
+  .sort-options { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin-bottom: 20px; display: none; }
+  .sort-options label { margin-right: 20px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .sort-options input[type="radio"] { margin-right: 5px; }
+
   /* ドキュメント一覧のスタイル */
   .documents-list { background: #fff; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 20px; display: none; }
   .documents-header { padding: 15px; background: #f5f5f5; border-bottom: 1px solid #ddd; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
@@ -40,6 +45,7 @@
   .total-posts { font-size: 0.85em; color: #666; display: block; }
   .match-count { font-size: 0.9em; color: #c0392b; font-weight: bold; }
   .document-source { font-size: 0.8em; color: #888; font-style: italic; }
+  .last-updated { font-size: 0.8em; color: #666; margin-top: 2px; }
   
   .thread-details { display: none; padding: 0 15px 15px; border-top: 1px solid #eee; }
   .thread-meta { padding: 12px 0; font-size: 0.95em; }
@@ -69,6 +75,7 @@
     input { width: 100%; margin-right: 0; margin-bottom: 10px; }
     .document-item { flex-direction: column; align-items: flex-start; gap: 8px; }
     .document-info { flex-direction: column; gap: 5px; }
+    .sort-options label { display: block; margin-bottom: 8px; }
   }
 </style>
 </head>
@@ -81,6 +88,22 @@
   <button id="clearBtn">クリア</button>
   <button id="docsBtn">ドキュメント一覧</button>
   <button id="shareBtn">URL共有</button>
+</div>
+
+<div id="sortOptions" class="sort-options">
+  <strong>結果の並び順:</strong>
+  <label>
+    <input type="radio" name="sortOrder" value="newest" checked> 最新順
+  </label>
+  <label>
+    <input type="radio" name="sortOrder" value="oldest"> 古い順
+  </label>
+  <label>
+    <input type="radio" name="sortOrder" value="document"> ドキュメント名順
+  </label>
+  <label>
+    <input type="radio" name="sortOrder" value="relevance"> 関連度順
+  </label>
 </div>
 
 <div id="documentsList" class="documents-list">
@@ -113,6 +136,7 @@
   const db = getFirestore(app);
   let allDocuments = [];
   let allDocumentThreads = new Map(); // ドキュメントID -> スレッドデータのマップ
+  let currentSearchResults = []; // 現在の検索結果を保存
 
   function formatBytes(bytes) {
     if (!bytes || bytes === 0) return '0 B';
@@ -120,6 +144,20 @@
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  function parseDateTime(dateTimeStr) {
+    if (!dateTimeStr) return null;
+    
+    // 日本のタイムゾーンで解析（例: "24/12/25(水) 15:30:45"）
+    const match = dateTimeStr.match(/(\d{2})\/(\d{2})\/(\d{2})\([^)]+\)\s+(\d{2}):(\d{2}):(\d{2})/);
+    if (!match) return null;
+    
+    const [, year, month, day, hour, minute, second] = match;
+    // 20XX年として扱う（例: 24 -> 2024）
+    const fullYear = parseInt(year) + 2000;
+    
+    return new Date(fullYear, parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute), parseInt(second));
   }
 
   function parseContentData(content) {
@@ -165,6 +203,7 @@
 
       const posts = [];
       let threadTitle = "（タイトル不明）";
+      let lastPostTime = null;
 
       postStrings.forEach((postStr, index) => {
         const postParts = postStr.split('<>');
@@ -222,11 +261,18 @@
         // 日時とIDを抽出（ID: の後の空白を許容するように修正）
         const idMatch = dateTimeAndId.match(/(\d{2}\/\d{2}\/\d{2}\([^)]+\) \d{2}:\d{2}:\d{2}) ID:\s*(\S+)/);
         if (idMatch) {
+          const postTime = idMatch[1];
+          const parsedTime = parseDateTime(postTime);
+          if (parsedTime) {
+            lastPostTime = parsedTime;
+          }
+          
           posts.push({
             postNumber: index + 1, // レス番号を追加
             author: author,
             sage: emailOrSage === 'sage',
-            postTime: idMatch[1],
+            postTime: postTime,
+            postTimeDate: parsedTime, // Date オブジェクト
             userId: idMatch[2],
             content: postContent.replace(/<br>/g, '\n').trim()
           });
@@ -239,7 +285,8 @@
           title: threadTitle,
           link: `https://hayabusa.open2ch.net/test/read.cgi/livejupiter/${threadId}/`,
           posts: posts,
-          lastUpdated: posts[posts.length - 1].postTime
+          lastUpdated: posts[posts.length - 1].postTime,
+          lastUpdatedDate: lastPostTime // Date オブジェクト
         });
       }
     }
@@ -359,16 +406,58 @@
     return text.replace(regex, '<span class="highlight">$1</span>');
   }
 
+  function sortSearchResults(results, sortOrder) {
+    const sortedResults = [...results];
+    
+    switch (sortOrder) {
+      case 'newest':
+        sortedResults.sort((a, b) => {
+          const dateA = a.lastUpdatedDate || new Date(0);
+          const dateB = b.lastUpdatedDate || new Date(0);
+          return dateB.getTime() - dateA.getTime();
+        });
+        break;
+      case 'oldest':
+        sortedResults.sort((a, b) => {
+          const dateA = a.lastUpdatedDate || new Date(0);
+          const dateB = b.lastUpdatedDate || new Date(0);
+          return dateA.getTime() - dateB.getTime();
+        });
+        break;
+      case 'document':
+        sortedResults.sort((a, b) => {
+          const nameA = a.documentName || '';
+          const nameB = b.documentName || '';
+          return nameA.localeCompare(nameB, undefined, {numeric: true});
+        });
+        break;
+      case 'relevance':
+        // 関連度順（マッチした投稿数でソート）
+        sortedResults.sort((a, b) => b.matchedPosts.length - a.matchedPosts.length);
+        break;
+      default:
+        break;
+    }
+    
+    return sortedResults;
+  }
+
   function renderSearchResults(results, keyword) {
     const resultsDiv = document.getElementById('results');
     const summaryDiv = document.getElementById('searchSummary');
+    const sortOptionsDiv = document.getElementById('sortOptions');
+    
     resultsDiv.innerHTML = '';
 
     if (results.length === 0) {
         resultsDiv.innerHTML = '<p>検索条件に一致するスレッドがありませんでした。</p>';
         summaryDiv.style.display = 'none';
+        sortOptionsDiv.style.display = 'none';
         return;
     }
+
+    // ソートオプションを表示
+    sortOptionsDiv.style.display = 'block';
 
     // 検索結果サマリーを表示
     const totalMatches = results.reduce((sum, r) => sum + r.matchedPosts.length, 0);
@@ -390,6 +479,7 @@
             <div class="thread-title-wrapper">
                 <span class="thread-title">${highlightSearchTerm(thread.title, keyword)}</span>
                 ${thread.documentName ? `<div class="document-source">出典: ${thread.documentName}</div>` : ''}
+                <div class="last-updated">最終更新: ${thread.lastUpdated}</div>
             </div>
             <div class="thread-stats">
                 <span class="total-posts">全${thread.posts.length}レス</span>
@@ -400,7 +490,7 @@
         const detailsDiv = document.createElement('div');
         detailsDiv.className = 'thread-details';
         detailsDiv.innerHTML = `<div class="thread-meta">
-            <a href="${thread.link}" target="_blank" rel="noopener noreferrer">このスレッドへのリンク</a> | <strong>最終更新:</strong> ${thread.lastUpdated}
+            <a href="${thread.link}" target="_blank" rel="noopener noreferrer">このスレッドへのリンク</a>
         </div>`;
 
         thread.matchedPosts.forEach(post => {
@@ -518,22 +608,34 @@
         searchResults.push(...docResults);
       });
 
-      // 結果をドキュメント名でソート
-      searchResults.sort((a, b) => {
-        const nameA = a.documentName || '';
-        const nameB = b.documentName || '';
-        return nameA.localeCompare(nameB, undefined, {numeric: true});
-      });
+      // 現在の検索結果を保存
+      currentSearchResults = searchResults;
 
-      renderSearchResults(searchResults, keyword);
+      // 選択されたソート順で結果をソート
+      const sortOrder = document.querySelector('input[name="sortOrder"]:checked').value;
+      const sortedResults = sortSearchResults(searchResults, sortOrder);
+
+      renderSearchResults(sortedResults, keyword);
       updateUrlParams(keyword);
     }, 100);
+  }
+
+  function applySorting() {
+    if (currentSearchResults.length === 0) return;
+    
+    const keyword = document.getElementById('searchInput').value.trim();
+    const sortOrder = document.querySelector('input[name="sortOrder"]:checked').value;
+    const sortedResults = sortSearchResults(currentSearchResults, sortOrder);
+    
+    renderSearchResults(sortedResults, keyword);
   }
   
   function clearSearch() {
     document.getElementById('searchInput').value = '';
     document.getElementById('results').innerHTML = '<p>検索ボックスにキーワードを入力して検索してください。</p>';
     document.getElementById('searchSummary').style.display = 'none';
+    document.getElementById('sortOptions').style.display = 'none';
+    currentSearchResults = [];
     updateInfoPanel();
     updateUrlParams('');
   }
@@ -593,6 +695,11 @@
       e.preventDefault();
       searchPosts();
     }
+  });
+
+  // ソートオプションの変更イベントリスナー
+  document.querySelectorAll('input[name="sortOrder"]').forEach(radio => {
+    radio.addEventListener('change', applySorting);
   });
 
   // ブラウザバック/フォワード対応
