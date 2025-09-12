@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ONJ　全文検索</title>
+<title>ONJ 掲示板データ検索</title>
 <style>
   body { font-family: system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN',Meiryo,Arial; margin: 18px; line-height: 1.5; background-color: #f4f4f9; color: #333; }
   input { padding: 10px; width: 70%; margin-right: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 1em; }
@@ -204,47 +204,58 @@
                 // sage がない場合
                 postDetails = parts[1];
                 postContent = parts.slice(2).join('<>');
+                emailOrSage = '';
             }
 
-            // 最初のレスからタイトルを抽出（より堅牢な方法）
+            // 最初のレスからタイトルを抽出
             if (index === 0 && postContent) {
-              // 様々なパターンでタイトルを抽出
+              // 「前スレ」で始まる行より後ろの部分を探す
+              const lines = postContent.split(/<br>|\n/);
+              let foundTitle = false;
               let extractedTitle = '';
               
-              // パターン1: " <>" で分割して最後の部分
-              const titleSplit = postContent.split(' <>');
-              if (titleSplit.length > 1) {
-                extractedTitle = titleSplit[titleSplit.length - 1].trim();
-              } else {
-                // パターン2: 改行やbrタグで分割して最後の非空行
-                const contentLines = postContent.split(/<br>|\n/);
-                const nonEmptyLines = contentLines.filter(line => line.trim());
-                if (nonEmptyLines.length > 0) {
-                  extractedTitle = nonEmptyLines[nonEmptyLines.length - 1].trim();
+              for (let j = 0; j < lines.length; j++) {
+                const line = lines[j].trim();
+                if (line.startsWith('前スレ')) {
+                  // 前スレの次の行から最後の行までをタイトルとして検討
+                  for (let k = j + 1; k < lines.length; k++) {
+                    const candidateLine = lines[k].trim();
+                    if (candidateLine && !candidateLine.startsWith('http') && candidateLine !== ' <>') {
+                      extractedTitle = candidateLine;
+                      foundTitle = true;
+                      break;
+                    }
+                  }
+                  break;
                 }
               }
               
-              // パターン3: URLや特殊文字を除去してタイトル部分を抽出
-              if (extractedTitle) {
-                // URLパターンを除去
-                extractedTitle = extractedTitle.replace(/https?:\/\/[^\s<>]+/g, '').trim();
-                // 先頭の「前スレ」などを除去
-                extractedTitle = extractedTitle.replace(/^前スレ\s*/g, '').trim();
-                // 特殊コマンドを除去
-                extractedTitle = extractedTitle.replace(/!nopic\s*★[^<>]*$/g, '').trim();
-                
-                if (extractedTitle && extractedTitle.length > 0 && extractedTitle !== postContent.replace(/<br>/g, '\n').trim()) {
-                  threadTitle = extractedTitle;
-                  // タイトル部分を投稿内容から除去
-                  const titleIndex = postContent.lastIndexOf(extractedTitle);
-                  if (titleIndex > -1) {
-                    postContent = postContent.substring(0, titleIndex).trim();
+              // 前スレパターンが見つからない場合は最後の非空行を検索
+              if (!foundTitle) {
+                const nonEmptyLines = lines.filter(line => line.trim() && !line.trim().startsWith('http')).reverse();
+                for (const line of nonEmptyLines) {
+                  const cleanLine = line.trim();
+                  if (cleanLine && cleanLine !== ' <>') {
+                    extractedTitle = cleanLine;
+                    break;
                   }
+                }
+              }
+              
+              // 抽出したタイトルをクリーニング
+              if (extractedTitle) {
+                // HTMLタグやコマンドを除去
+                extractedTitle = extractedTitle.replace(/<[^>]*>/g, '').trim();
+                extractedTitle = extractedTitle.replace(/!nopic\s*★[^<>]*$/g, '').trim();
+                extractedTitle = extractedTitle.replace(/^\s*前スレ\s*/g, '').trim();
+                
+                if (extractedTitle && extractedTitle.length > 3) {
+                  threadTitle = extractedTitle;
                 }
               }
             }
             
-            // 日時とIDを抽出（より柔軟なパターンマッチング）
+            // 日時とIDを抽出
             const idMatch = postDetails.match(/(\d{2}\/\d{2}\/\d{2}\(.+?\) \d{2}:\d{2}:\d{2}) ID:(\S+)/);
             if (idMatch) {
                 posts.push({
