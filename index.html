@@ -219,10 +219,11 @@
           }
         }
         
-        // 日時とIDを抽出
-        const idMatch = dateTimeAndId.match(/(\d{2}\/\d{2}\/\d{2}\([^)]+\) \d{2}:\d{2}:\d{2}) ID:(\S+)/);
+        // 日時とIDを抽出（ID: の後の空白を許容するように修正）
+        const idMatch = dateTimeAndId.match(/(\d{2}\/\d{2}\/\d{2}\([^)]+\) \d{2}:\d{2}:\d{2}) ID:\s*(\S+)/);
         if (idMatch) {
           posts.push({
+            postNumber: index + 1, // ★改良点: レス番号を追加
             author: author,
             sage: emailOrSage === 'sage',
             postTime: idMatch[1],
@@ -394,9 +395,11 @@
             const highlightedAuthor = highlightSearchTerm(post.author, keyword);
             const highlightedUserId = highlightSearchTerm(post.userId, keyword);
             const sageIndicator = post.sage ? ' <span style="color: #888; font-size: 0.9em;">[sage]</span>' : '';
+            
+            // ★改良点: レス番号を表示
             postDiv.innerHTML = `
                 <div class="post-meta">
-                    <strong>${highlightedAuthor}</strong>${sageIndicator} | 時刻: ${post.postTime} | ID: ${highlightedUserId}
+                    <strong>${post.postNumber}: ${highlightedAuthor}</strong>${sageIndicator} | 時刻: ${post.postTime} | ID: ${highlightedUserId}
                 </div>
                 <div class="post-content">${highlightedContent}</div>
             `;
@@ -416,12 +419,15 @@
 
   function searchInThreads(threads, keyword, documentName = null) {
     const lowerKeyword = keyword.toLowerCase();
+    // ★改良点: ID検索用に空白を除去したキーワードを用意
+    const keywordForIdSearch = lowerKeyword.replace(/\s/g, '');
     const searchResults = [];
 
     threads.forEach(thread => {
         const matchedPosts = thread.posts.filter(post => 
             (post.author && post.author.toLowerCase().includes(lowerKeyword)) ||
-            (post.userId && post.userId.toLowerCase().includes(lowerKeyword)) ||
+            // ★改良点: ID検索では空白を除去したキーワードを使用
+            (post.userId && post.userId.toLowerCase().includes(keywordForIdSearch)) ||
             (post.content && post.content.toLowerCase().includes(lowerKeyword))
         );
 
