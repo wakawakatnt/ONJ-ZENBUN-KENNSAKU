@@ -232,29 +232,55 @@
         if (index === 0 && postContent) {
           let extractedTitle = '';
           
-          // タイトルは投稿内容の最後の部分（<>で分割された最後）
-          const contentParts = postContent.split(' <>');
+          // <> で分割して最後の部分を確認
+          const contentParts = postContent.split('<>');
+          
           if (contentParts.length > 1) {
-            // 最後の部分がタイトル
-            extractedTitle = contentParts[contentParts.length - 1].trim();
-            // タイトル部分を除いた内容を投稿内容とする
-            postContent = contentParts.slice(0, -1).join(' <>').trim();
+            // 最後の部分がタイトルの可能性が高い
+            let candidateTitle = contentParts[contentParts.length - 1].trim();
+            
+            // HTMLタグを除去
+            candidateTitle = candidateTitle.replace(/<[^>]+>/g, '').trim();
+            
+            // フォントタグなどの残骸を除去
+            candidateTitle = candidateTitle.replace(/^[^>]*>/, '').trim();
+            
+            // 特殊文字や記号の後ろの文字列を抽出（■や★の後など）
+            const symbolMatch = candidateTitle.match(/[■★▼▲☆]([^<>]+)$/);
+            if (symbolMatch) {
+              candidateTitle = symbolMatch[1].trim();
+            }
+            
+            // URLや特殊コマンドを除去
+            candidateTitle = candidateTitle.replace(/https?:\/\/[^\s]+/g, '').trim();
+            candidateTitle = candidateTitle.replace(/!nopic\s*★[^<>]*$/g, '').trim();
+            candidateTitle = candidateTitle.replace(/^前スレ\s*/g, '').trim();
+            
+            // 有効なタイトルかチェック（3文字以上で意味のある内容）
+            if (candidateTitle && candidateTitle.length >= 3 && 
+                !candidateTitle.match(/^[0-9\s\-_]+$/) && // 数字や記号だけではない
+                !candidateTitle.match(/^(test|テスト|確認)$/i)) { // 単純なテストワードではない
+              extractedTitle = candidateTitle;
+              // タイトル部分を除いた内容を投稿内容とする
+              postContent = contentParts.slice(0, -1).join('<>').trim();
+            }
           }
           
-          // タイトルのクリーンアップ
-          if (extractedTitle) {
-            // HTMLタグを除去
-            extractedTitle = extractedTitle.replace(/<[^>]+>/g, '').trim();
-            // URLを除去
-            extractedTitle = extractedTitle.replace(/https?:\/\/[^\s]+/g, '').trim();
-            // 特殊コマンドを除去
-            extractedTitle = extractedTitle.replace(/!nopic\s*★[^<>]*$/g, '').trim();
-            // 前ス레表記を除去
-            extractedTitle = extractedTitle.replace(/^前スレ\s*/g, '').trim();
+          // それでもタイトルが取れない場合、投稿内容の最初の行から推測
+          if (!extractedTitle && postContent) {
+            const firstLine = postContent.split('\n')[0].trim();
+            const cleanFirstLine = firstLine.replace(/<[^>]+>/g, '').trim();
             
-            if (extractedTitle && extractedTitle.length > 0) {
-              threadTitle = extractedTitle;
+            // 最初の行が短くて意味がありそうならタイトルとする
+            if (cleanFirstLine.length >= 3 && cleanFirstLine.length <= 50 && 
+                !cleanFirstLine.match(/^https?:\/\//) && 
+                !cleanFirstLine.match(/^[0-9\s\-_]+$/)) {
+              extractedTitle = cleanFirstLine;
             }
+          }
+          
+          if (extractedTitle) {
+            threadTitle = extractedTitle;
           }
         }
         
