@@ -427,7 +427,6 @@
     });
   }
 
-  // ★★★ ここを改良しました ★★★
   function searchInThreads(threads, keyword, documentName = null) {
     const lowerKeyword = keyword.toLowerCase();
     const searchResults = [];
@@ -437,11 +436,12 @@
 
     if (idSearchMatch) {
         // ID専用検索の場合
-        const targetId = idSearchMatch[1].trim().replace(/\s/g, ''); // "ID:"以降を取得し、空白をすべて除去
+        const targetId = idSearchMatch[1].trim().replace(/\s/g, '');
         if (targetId) {
             threads.forEach(thread => {
                 const matchedPosts = thread.posts.filter(post => 
-                    post.userId && post.userId.toLowerCase() === targetId
+                    // ★★★ ここを改良しました: 完全一致(===)から部分一致(.includes)に変更 ★★★
+                    post.userId && post.userId.toLowerCase().includes(targetId)
                 );
                 if (matchedPosts.length > 0) {
                     const result = { ...thread, matchedPosts: matchedPosts };
@@ -454,7 +454,7 @@
         }
     } else {
         // 通常の検索（名前、ID、投稿内容）
-        const keywordForIdSearch = lowerKeyword.replace(/\s/g, ''); // ユーザーがIDだけを入力した場合用
+        const keywordForIdSearch = lowerKeyword.replace(/\s/g, '');
 
         threads.forEach(thread => {
             const matchedPosts = thread.posts.filter(post => 
