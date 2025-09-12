@@ -126,165 +126,123 @@
     const threads = [];
     
     // =!=!=を使って分割（スレッド区切り）
-    const parts = content.split('=!=!=').filter(part => part.trim());
+    const threadParts = content.split(/=!=!=(\d+)=!=!=/);
     
-    for (let i = 0; i < parts.length; i++) {
-        const part = parts[i].trim();
-        if (!part) continue;
+    // 最初の空要素を削除
+    if (threadParts[0] === '') {
+      threadParts.shift();
+    }
+    
+    // スレッドIDとコンテンツをペアで処理
+    for (let i = 0; i < threadParts.length; i += 2) {
+      const threadId = threadParts[i];
+      const threadContent = threadParts[i + 1];
+      
+      if (!threadId || !threadContent) continue;
+      
+      // =?=?=で区切られたタイムスタンプ部分を削除
+      const contentParts = threadContent.split('=?=?=');
+      let cleanThreadContent = '';
+      if (contentParts.length >= 3) {
+        cleanThreadContent = contentParts.slice(2).join('=?=?=').trim();
+      } else {
+        cleanThreadContent = threadContent.trim();
+      }
+      
+      if (!cleanThreadContent) continue;
+      
+      // 投稿を分割するパターン（名無しさん＠おーぷんまたは特殊文字付きユーザー名）
+      const postPattern = /(?=(?:名無しさん＠おーぷん|[^\s<>]*?[▼▲★☆][^\s<>]*?)<>)/;
+      let postStrings = cleanThreadContent.split(postPattern).filter(s => s.trim());
+      
+      // 上記パターンで分割できない場合の予備パターン
+      if (postStrings.length <= 1) {
+        const alternatePattern = /(?=.+?<>.+?<>\d{2}\/\d{2}\/\d{2})/;
+        postStrings = cleanThreadContent.split(alternatePattern).filter(s => s.trim());
+      }
+      
+      if (postStrings.length === 0) continue;
+
+      const posts = [];
+      let threadTitle = "（タイトル不明）";
+
+      postStrings.forEach((postStr, index) => {
+        const postParts = postStr.split('<>');
+        if (postParts.length < 3) return;
+
+        const author = postParts[0].trim();
+        let emailOrSage = postParts[1] || '';
+        let dateTimeAndId = '';
+        let postContent = '';
         
-        // 最初の部分は通常空文字またはヘッダーなので、2番目以降を処理
-        if (i === 0 && !part.match(/^\d+$/)) continue;
-        
-        let threadId, threadContent;
-        
-        if (part.match(/^\d+$/)) {
-            // この部分がスレッドIDの場合、次の部分がコンテンツ
-            threadId = part;
-            if (i + 1 < parts.length) {
-                threadContent = parts[i + 1].trim();
-                i++; // 次のループをスキップ
-            } else {
-                continue; // コンテンツがない場合はスキップ
-            }
+        // sageがある場合とない場合を判定
+        if (postParts.length >= 4 && postParts[2].match(/\d{2}\/\d{2}\/\d{2}/)) {
+          // sage有り: author<>sage<>datetime<>content
+          dateTimeAndId = postParts[2];
+          postContent = postParts.slice(3).join('<>');
+        } else if (postParts.length >= 3 && postParts[1].match(/\d{2}\/\d{2}\/\d{2}/)) {
+          // sage無し: author<>datetime<>content
+          dateTimeAndId = postParts[1];
+          postContent = postParts.slice(2).join('<>');
+          emailOrSage = '';
         } else {
-            // 既存のロジックでスレッドIDとコンテンツを分離
-            const lines = part.split('\n');
-            const firstLine = lines[0].trim();
-            
-            if (firstLine.match(/^\d+$/)) {
-                threadId = firstLine;
-                threadContent = lines.slice(1).join('\n');
-            } else {
-                // スレッドIDが見つからない場合はスキップ
-                continue;
-            }
+          return; // 形式が合わない場合はスキップ
         }
 
-        if (!threadId || !threadContent) continue;
-        
-        // =?=?=で区切られたタイムスタンプ部分を削除
-        const contentParts = threadContent.split('=?=?=');
-        let cleanThreadContent = '';
-        if (contentParts.length >= 3) {
-          cleanThreadContent = contentParts.slice(2).join('=?=?=');
-        } else {
-          cleanThreadContent = threadContent;
+        // 最初の投稿からタイトルを抽出
+        if (index === 0 && postContent) {
+          let extractedTitle = '';
+          
+          // タイトルは投稿内容の最後の部分（<>で分割された最後）
+          const contentParts = postContent.split(' <>');
+          if (contentParts.length > 1) {
+            // 最後の部分がタイトル
+            extractedTitle = contentParts[contentParts.length - 1].trim();
+            // タイトル部分を除いた内容を投稿内容とする
+            postContent = contentParts.slice(0, -1).join(' <>').trim();
+          }
+          
+          // タイトルのクリーンアップ
+          if (extractedTitle) {
+            // HTMLタグを除去
+            extractedTitle = extractedTitle.replace(/<[^>]+>/g, '').trim();
+            // URLを除去
+            extractedTitle = extractedTitle.replace(/https?:\/\/[^\s]+/g, '').trim();
+            // 特殊コマンドを除去
+            extractedTitle = extractedTitle.replace(/!nopic\s*★[^<>]*$/g, '').trim();
+            // 前スレ表記を除去
+            extractedTitle = extractedTitle.replace(/^前スレ\s*/g, '').trim();
+            
+            if (extractedTitle && extractedTitle.length > 0) {
+              threadTitle = extractedTitle;
+            }
+          }
         }
         
-        // より柔軟な投稿分割のパターンを使用
-        // 名無しさん@おーぷん または コテハン名（▼、▲等を含む）で分割
-        const postPattern = /(?=(?:名無しさん＠おーぷん|.+?[▼▲★☆].*?)<>)/;
-        const postStrings = cleanThreadContent.split(postPattern).filter(s => s.trim());
-        
-        // もし上記パターンでうまく分割できない場合は、より単純なパターンを試す
-        if (postStrings.length === 0) {
-            const alternatePattern = /(?=.+?<>.+?<>\d{2}\/\d{2}\/\d{2}\(.+?\) \d{2}:\d{2}:\d{2})/;
-            postStrings.push(...cleanThreadContent.split(alternatePattern).filter(s => s.trim()));
-        }
-        
-        if (postStrings.length === 0) continue;
-
-        const posts = [];
-        let threadTitle = "（タイトル不明）";
-
-        postStrings.forEach((postStr, index) => {
-            const parts = postStr.split('<>');
-            if (parts.length < 3) return;
-
-            const author = parts[0];
-            let emailOrSage = parts[1] || '';  // sage や メールアドレス
-            let postDetails = '';
-            let postContent = '';
-            
-            // sage が含まれている場合の処理
-            if (parts.length >= 4) {
-                postDetails = parts[2];
-                postContent = parts.slice(3).join('<>');
-            } else {
-                // sage がない場合
-                postDetails = parts[1];
-                postContent = parts.slice(2).join('<>');
-                emailOrSage = '';
-            }
-
-            // 最初のレスからタイトルを抽出
-            if (index === 0 && postContent) {
-              let extractedTitle = '';
-              
-              // パターン1: <> で終わる場合（最後の <>の後がタイトル）
-              const lastDelimiterMatch = postContent.match(/.*<>(.+?)$/);
-              if (lastDelimiterMatch && lastDelimiterMatch[1].trim()) {
-                extractedTitle = lastDelimiterMatch[1].trim();
-              } else {
-                // パターン2: 「前スレ」で始まる行より後ろの部分を探す
-                const lines = postContent.split(/<br>|\n/);
-                let foundTitle = false;
-                
-                for (let j = 0; j < lines.length; j++) {
-                  const line = lines[j].trim();
-                  if (line.startsWith('前スレ')) {
-                    // 前スレの次の行から最後の行までをタイトルとして検討
-                    for (let k = j + 1; k < lines.length; k++) {
-                      const candidateLine = lines[k].trim();
-                      if (candidateLine && !candidateLine.startsWith('http') && candidateLine !== ' <>') {
-                        extractedTitle = candidateLine;
-                        foundTitle = true;
-                        break;
-                      }
-                    }
-                    break;
-                  }
-                }
-                
-                // 前スレパターンが見つからない場合は最後の非空行を検索
-                if (!foundTitle) {
-                  const nonEmptyLines = lines.filter(line => line.trim() && !line.trim().startsWith('http')).reverse();
-                  for (const line of nonEmptyLines) {
-                    const cleanLine = line.trim();
-                    if (cleanLine && cleanLine !== ' <>') {
-                      extractedTitle = cleanLine;
-                      break;
-                    }
-                  }
-                }
-              }
-              
-              // 抽出したタイトルをクリーニング
-              if (extractedTitle) {
-                // HTMLタグやコマンドを除去
-                extractedTitle = extractedTitle.replace(/<[^>]*>/g, '').trim();
-                extractedTitle = extractedTitle.replace(/!nopic\s*★[^<>]*$/g, '').trim();
-                extractedTitle = extractedTitle.replace(/^\s*前スレ\s*/g, '').trim();
-                
-                if (extractedTitle && extractedTitle.length > 3) {
-                  threadTitle = extractedTitle;
-                }
-              }
-            }
-            
-            // 日時とIDを抽出
-            const idMatch = postDetails.match(/(\d{2}\/\d{2}\/\d{2}\(.+?\) \d{2}:\d{2}:\d{2}) ID:(\S+)/);
-            if (idMatch) {
-                posts.push({
-                    author: author.trim(),
-                    sage: emailOrSage === 'sage',
-                    postTime: idMatch[1],
-                    userId: idMatch[2],
-                    content: postContent.replace(/<br>/g, '\n').trim()
-                });
-            }
-        });
-        
-        if (posts.length > 0) {
-          threads.push({
-            id: threadId,
-            title: threadTitle,
-            link: `https://hayabusa.open2ch.net/test/read.cgi/livejupiter/${threadId}/`,
-            posts: posts,
-            lastUpdated: posts[posts.length - 1].postTime
+        // 日時とIDを抽出
+        const idMatch = dateTimeAndId.match(/(\d{2}\/\d{2}\/\d{2}\([^)]+\) \d{2}:\d{2}:\d{2}) ID:(\S+)/);
+        if (idMatch) {
+          posts.push({
+            author: author,
+            sage: emailOrSage === 'sage',
+            postTime: idMatch[1],
+            userId: idMatch[2],
+            content: postContent.replace(/<br>/g, '\n').trim()
           });
         }
+      });
+      
+      if (posts.length > 0) {
+        threads.push({
+          id: threadId,
+          title: threadTitle,
+          link: `https://hayabusa.open2ch.net/test/read.cgi/livejupiter/${threadId}/`,
+          posts: posts,
+          lastUpdated: posts[posts.length - 1].postTime
+        });
+      }
     }
+    
     return threads;
   }
   
