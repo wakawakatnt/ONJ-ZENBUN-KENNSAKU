@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8">
+<meta charset="utf--8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>おんJ全文検索</title>
+<title>ONJ 掲示板データ検索</title>
 <style>
   body { font-family: system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN',Meiryo,Arial; margin: 18px; line-height: 1.5; background-color: #f4f4f9; color: #333; }
   input { padding: 10px; width: 70%; margin-right: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 1em; }
@@ -18,10 +18,12 @@
   .controls { margin-bottom: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .info { background: #e3f2fd; padding: 12px; margin-bottom: 20px; border-radius: 6px; border-left: 5px solid #1976d2; }
 
-  /* ソートオプション */
-  .sort-options { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin-bottom: 20px; display: none; }
-  .sort-options label { margin-right: 20px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
-  .sort-options input[type="radio"] { margin-right: 5px; }
+  /* 検索オプション */
+  .search-options-wrapper { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+  .search-type-options, .sort-options { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 12px; }
+  .search-type-options label, .sort-options label { margin-right: 20px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .search-type-options input[type="radio"], .sort-options input[type="radio"] { margin-right: 5px; }
+  .sort-options { display: none; } /* 初期状態は非表示 */
 
   /* ドキュメント一覧のスタイル */
   .documents-list { background: #fff; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 20px; display: none; }
@@ -75,12 +77,12 @@
     input { width: 100%; margin-right: 0; margin-bottom: 10px; }
     .document-item { flex-direction: column; align-items: flex-start; gap: 8px; }
     .document-info { flex-direction: column; gap: 5px; }
-    .sort-options label { display: block; margin-bottom: 8px; }
+    .search-type-options label, .sort-options label { display: block; margin-bottom: 8px; }
   }
 </style>
 </head>
 <body>
-<h2>おんJ全文検索</h2>
+<h2>ONJ 掲示板データ検索システム</h2>
 
 <div class="controls">
   <input type="text" id="searchInput" placeholder="検索ワード（名前、ID、投稿内容）">
@@ -90,20 +92,35 @@
   <button id="shareBtn">URL共有</button>
 </div>
 
-<div id="sortOptions" class="sort-options">
-  <strong>結果の並び順:</strong>
-  <label>
-    <input type="radio" name="sortOrder" value="newest" checked> 最新順
-  </label>
-  <label>
-    <input type="radio" name="sortOrder" value="oldest"> 古い順
-  </label>
-  <label>
-    <input type="radio" name="sortOrder" value="document"> ドキュメント名順
-  </label>
-  <label>
-    <input type="radio" name="sortOrder" value="relevance"> 関連度順
-  </label>
+<div class="search-options-wrapper">
+  <div id="searchTypeOptions" class="search-type-options">
+    <strong>検索範囲:</strong>
+    <label>
+      <input type="radio" name="searchType" value="all" checked> 全て
+    </label>
+    <label>
+      <input type="radio" name="searchType" value="title"> スレタイのみ
+    </label>
+    <label>
+      <input type="radio" name="searchType" value="body"> 本文のみ (名前, ID, 投稿内容)
+    </label>
+  </div>
+
+  <div id="sortOptions" class="sort-options">
+    <strong>結果の並び順:</strong>
+    <label>
+      <input type="radio" name="sortOrder" value="newest" checked> 最新順
+    </label>
+    <label>
+      <input type="radio" name="sortOrder" value="oldest"> 古い順
+    </label>
+    <label>
+      <input type="radio" name="sortOrder" value="document"> ドキュメント名順
+    </label>
+    <label>
+      <input type="radio" name="sortOrder" value="relevance"> 関連度順
+    </label>
+  </div>
 </div>
 
 <div id="documentsList" class="documents-list">
@@ -189,8 +206,8 @@
       
       if (!cleanThreadContent) continue;
       
-      // 投稿を分割するパターン（名無しさん＠おーぷんまたは特殊文字付きユーザー名）
-      const postPattern = /(?=(?:名無しさん＠おーぷん|[^\s<>]*?[▼▲★☆][^\s<>]*?)<>)/;
+      // 【改良点1】投稿を分割するパターンに「■」を追加
+      const postPattern = /(?=(?:名無しさん＠おーぷん|[^\s<>]*?[▼▲★☆■][^\s<>]*?)<>)/;
       let postStrings = cleanThreadContent.split(postPattern).filter(s => s.trim());
       
       // 上記パターンで分割できない場合の予備パターン
@@ -551,16 +568,16 @@
     });
   }
 
-  // ★★★ ここを改良しました (タイトル検索とID検索) ★★★
-  function searchInThreads(threads, keyword, documentName = null) {
+  // 【改良点2】検索範囲（スレタイ/本文）に対応した検索ロジック
+  function searchInThreads(threads, keyword, documentName = null, searchType = 'all') {
     const lowerKeyword = keyword.toLowerCase();
     const searchResults = [];
 
-    // "ID:"で始まるかチェック
-    const idSearchMatch = keyword.match(/^id:\s*(.*)/i);
+    // "ID:"で始まるかチェック (スレタイ検索では無効)
+    const idSearchMatch = searchType !== 'title' ? keyword.match(/^id:\s*(.*)/i) : null;
 
     if (idSearchMatch) {
-        // ID専用検索
+        // ID専用検索 (本文検索 or 全て検索)
         const targetId = idSearchMatch[1].trim().replace(/\s/g, '');
         if (targetId) {
             threads.forEach(thread => {
@@ -577,19 +594,25 @@
             });
         }
     } else {
-        // 通常検索 (タイトル、名前、ID、投稿内容)
+        // 通常検索
         const keywordForIdSearch = lowerKeyword.replace(/\s/g, '');
 
         threads.forEach(thread => {
-            // 投稿内容、名前、IDからヒットするレスを検索
-            const postsMatchingKeyword = thread.posts.filter(post => 
-                (post.author && post.author.toLowerCase().includes(lowerKeyword)) ||
-                (post.userId && post.userId.toLowerCase().includes(keywordForIdSearch)) ||
-                (post.content && post.content.toLowerCase().includes(lowerKeyword))
-            );
+            let postsMatchingKeyword = [];
+            let titleMatches = false;
 
-            // スレッドタイトルがヒットするかどうか
-            const titleMatches = thread.title.toLowerCase().includes(lowerKeyword);
+            // 検索タイプに応じて検索対象を切り替え
+            if (searchType === 'body' || searchType === 'all') {
+                postsMatchingKeyword = thread.posts.filter(post => 
+                    (post.author && post.author.toLowerCase().includes(lowerKeyword)) ||
+                    (post.userId && post.userId.toLowerCase().includes(keywordForIdSearch)) ||
+                    (post.content && post.content.toLowerCase().includes(lowerKeyword))
+                );
+            }
+
+            if (searchType === 'title' || searchType === 'all') {
+                titleMatches = thread.title.toLowerCase().includes(lowerKeyword);
+            }
 
             // レスかタイトルのいずれかがヒットした場合
             if (postsMatchingKeyword.length > 0 || titleMatches) {
@@ -598,12 +621,16 @@
                 // タイトルがヒットした場合、1番目のレスがまだ結果に含まれていなければ追加
                 if (titleMatches && thread.posts.length > 0) {
                     const firstPost = thread.posts[0];
-                    if (!finalMatchedPosts.includes(firstPost)) {
-                        finalMatchedPosts.unshift(firstPost); // 配列の先頭に追加
+                    // 既に本文検索でヒットしている場合を除き、先頭に追加する
+                    if (!finalMatchedPosts.some(p => p.postNumber === firstPost.postNumber)) {
+                        finalMatchedPosts.unshift(firstPost);
                     }
                 }
                 
-                searchResults.push({ ...thread, matchedPosts: finalMatchedPosts, documentName });
+                // ヒットした投稿がなければ結果に追加しない
+                if (finalMatchedPosts.length > 0) {
+                    searchResults.push({ ...thread, matchedPosts: finalMatchedPosts, documentName });
+                }
             }
         });
     }
@@ -628,9 +655,10 @@
     // 少し遅延を入れてUIの更新を確実にする
     setTimeout(() => {
       let searchResults = [];
+      const searchType = document.querySelector('input[name="searchType"]:checked').value;
       
       allDocumentThreads.forEach((threads, docId) => {
-        const docResults = searchInThreads(threads, keyword, docId);
+        const docResults = searchInThreads(threads, keyword, docId, searchType);
         searchResults.push(...docResults);
       });
 
