@@ -339,7 +339,18 @@
 
   function highlightSearchTerm(text, term) {
     if (!term || !text) return text;
-    const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // ID専用検索の場合、"ID:"を除いた部分のみをハイライトする
+    const lowerTerm = term.toLowerCase();
+    let termToHighlight = lowerTerm;
+    const idSearchMatch = lowerTerm.match(/^id:\s*(.*)/);
+    if (idSearchMatch) {
+        termToHighlight = idSearchMatch[1].trim().replace(/\s/g, '');
+    }
+
+    if (!termToHighlight) return text;
+
+    const escapedTerm = termToHighlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`(${escapedTerm})`, 'gi');
     return text.replace(regex, '<span class="highlight">$1</span>');
   }
@@ -396,7 +407,6 @@
             const highlightedUserId = highlightSearchTerm(post.userId, keyword);
             const sageIndicator = post.sage ? ' <span style="color: #888; font-size: 0.9em;">[sage]</span>' : '';
             
-            // ★改良点: ID表示部分のスペースを削除
             postDiv.innerHTML = `
                 <div class="post-meta">
                     <strong>${post.postNumber}: ${highlightedAuthor}</strong>${sageIndicator} | 時刻: ${post.postTime} | ID:${highlightedUserId}
@@ -417,28 +427,51 @@
     });
   }
 
+  // ★★★ ここを改良しました ★★★
   function searchInThreads(threads, keyword, documentName = null) {
     const lowerKeyword = keyword.toLowerCase();
-    // ID検索用に空白を除去したキーワードを用意
-    const keywordForIdSearch = lowerKeyword.replace(/\s/g, '');
     const searchResults = [];
 
-    threads.forEach(thread => {
-        const matchedPosts = thread.posts.filter(post => 
-            (post.author && post.author.toLowerCase().includes(lowerKeyword)) ||
-            // ID検索では空白を除去したキーワードを使用
-            (post.userId && post.userId.toLowerCase().includes(keywordForIdSearch)) ||
-            (post.content && post.content.toLowerCase().includes(lowerKeyword))
-        );
+    // "ID:"で始まるかチェック（前後の空白は無視）
+    const idSearchMatch = lowerKeyword.match(/^id:\s*(.*)/);
 
-        if (matchedPosts.length > 0) {
-            const result = { ...thread, matchedPosts: matchedPosts };
-            if (documentName) {
-                result.documentName = documentName;
-            }
-            searchResults.push(result);
+    if (idSearchMatch) {
+        // ID専用検索の場合
+        const targetId = idSearchMatch[1].trim().replace(/\s/g, ''); // "ID:"以降を取得し、空白をすべて除去
+        if (targetId) {
+            threads.forEach(thread => {
+                const matchedPosts = thread.posts.filter(post => 
+                    post.userId && post.userId.toLowerCase() === targetId
+                );
+                if (matchedPosts.length > 0) {
+                    const result = { ...thread, matchedPosts: matchedPosts };
+                    if (documentName) {
+                        result.documentName = documentName;
+                    }
+                    searchResults.push(result);
+                }
+            });
         }
-    });
+    } else {
+        // 通常の検索（名前、ID、投稿内容）
+        const keywordForIdSearch = lowerKeyword.replace(/\s/g, ''); // ユーザーがIDだけを入力した場合用
+
+        threads.forEach(thread => {
+            const matchedPosts = thread.posts.filter(post => 
+                (post.author && post.author.toLowerCase().includes(lowerKeyword)) ||
+                (post.userId && post.userId.toLowerCase().includes(keywordForIdSearch)) ||
+                (post.content && post.content.toLowerCase().includes(lowerKeyword))
+            );
+
+            if (matchedPosts.length > 0) {
+                const result = { ...thread, matchedPosts: matchedPosts };
+                if (documentName) {
+                    result.documentName = documentName;
+                }
+                searchResults.push(result);
+            }
+        });
+    }
 
     return searchResults;
   }
