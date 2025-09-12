@@ -427,6 +427,7 @@
     });
   }
 
+  // ★★★ ここを改良しました (ID検索) ★★★
   function searchInThreads(threads, keyword, documentName = null) {
     const lowerKeyword = keyword.toLowerCase();
     const searchResults = [];
@@ -440,8 +441,8 @@
         if (targetId) {
             threads.forEach(thread => {
                 const matchedPosts = thread.posts.filter(post => 
-                    // ★★★ ここを改良しました: 完全一致(===)から部分一致(.includes)に変更 ★★★
-                    post.userId && post.userId.toLowerCase().includes(targetId)
+                    // ★改良点: 前方一致(.startsWith)に変更
+                    post.userId && post.userId.toLowerCase().startsWith(targetId)
                 );
                 if (matchedPosts.length > 0) {
                     const result = { ...thread, matchedPosts: matchedPosts };
@@ -538,20 +539,28 @@
     }
   }
 
+  // ★★★ ここを改良しました (URL共有ボタン) ★★★
   function shareUrl() {
+    const shareButton = document.getElementById('shareBtn');
     const keyword = document.getElementById('searchInput').value.trim();
-    if (!keyword) {
-      alert('検索キーワードを入力してから共有URLを生成してください。');
-      return;
-    }
-
+    
     const url = new URL(window.location);
-    url.searchParams.set('search', keyword);
+    // キーワードがあればセット、なければパラメータを削除
+    if (keyword) {
+      url.searchParams.set('search', keyword);
+    } else {
+      url.searchParams.delete('search');
+    }
     const shareUrl = url.toString();
 
     navigator.clipboard.writeText(shareUrl).then(() => {
-      alert('URLをクリップボードにコピーしました！');
+      // 成功したらボタンのテキストを変更し、2秒後に戻す
+      shareButton.textContent = 'コピー完了';
+      setTimeout(() => {
+        shareButton.textContent = 'URL共有';
+      }, 2000);
     }).catch(() => {
+      // 失敗した場合のフォールバック
       prompt('以下のURLをコピーしてください:', shareUrl);
     });
   }
