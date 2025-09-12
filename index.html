@@ -206,8 +206,8 @@
       
       if (!cleanThreadContent) continue;
       
-      // 【改良点1】投稿を分割するパターンに「■」を追加
-      const postPattern = /(?=(?:名無しさん＠おーぷん|[^\s<>]*?[▼▲★☆■][^\s<>]*?)<>)/;
+      // 【修正】「■忍【...】」形式の名前を正確に認識できるよう、パターンを追加
+      const postPattern = /(?=(?:名無しさん＠おーぷん|■忍【.*?】|[^\s<>]*?[▼▲★☆■][^\s<>]*?)<>)/;
       let postStrings = cleanThreadContent.split(postPattern).filter(s => s.trim());
       
       // 上記パターンで分割できない場合の予備パターン
