@@ -209,35 +209,42 @@
 
             // 最初のレスからタイトルを抽出
             if (index === 0 && postContent) {
-              // 「前スレ」で始まる行より後ろの部分を探す
-              const lines = postContent.split(/<br>|\n/);
-              let foundTitle = false;
               let extractedTitle = '';
               
-              for (let j = 0; j < lines.length; j++) {
-                const line = lines[j].trim();
-                if (line.startsWith('前スレ')) {
-                  // 前スレの次の行から最後の行までをタイトルとして検討
-                  for (let k = j + 1; k < lines.length; k++) {
-                    const candidateLine = lines[k].trim();
-                    if (candidateLine && !candidateLine.startsWith('http') && candidateLine !== ' <>') {
-                      extractedTitle = candidateLine;
-                      foundTitle = true;
+              // パターン1: <> で終わる場合（最後の <>の後がタイトル）
+              const lastDelimiterMatch = postContent.match(/.*<>(.+?)$/);
+              if (lastDelimiterMatch && lastDelimiterMatch[1].trim()) {
+                extractedTitle = lastDelimiterMatch[1].trim();
+              } else {
+                // パターン2: 「前スレ」で始まる行より後ろの部分を探す
+                const lines = postContent.split(/<br>|\n/);
+                let foundTitle = false;
+                
+                for (let j = 0; j < lines.length; j++) {
+                  const line = lines[j].trim();
+                  if (line.startsWith('前スレ')) {
+                    // 前スレの次の行から最後の行までをタイトルとして検討
+                    for (let k = j + 1; k < lines.length; k++) {
+                      const candidateLine = lines[k].trim();
+                      if (candidateLine && !candidateLine.startsWith('http') && candidateLine !== ' <>') {
+                        extractedTitle = candidateLine;
+                        foundTitle = true;
+                        break;
+                      }
+                    }
+                    break;
+                  }
+                }
+                
+                // 前スレパターンが見つからない場合は最後の非空行を検索
+                if (!foundTitle) {
+                  const nonEmptyLines = lines.filter(line => line.trim() && !line.trim().startsWith('http')).reverse();
+                  for (const line of nonEmptyLines) {
+                    const cleanLine = line.trim();
+                    if (cleanLine && cleanLine !== ' <>') {
+                      extractedTitle = cleanLine;
                       break;
                     }
-                  }
-                  break;
-                }
-              }
-              
-              // 前スレパターンが見つからない場合は最後の非空行を検索
-              if (!foundTitle) {
-                const nonEmptyLines = lines.filter(line => line.trim() && !line.trim().startsWith('http')).reverse();
-                for (const line of nonEmptyLines) {
-                  const cleanLine = line.trim();
-                  if (cleanLine && cleanLine !== ' <>') {
-                    extractedTitle = cleanLine;
-                    break;
                   }
                 }
               }
