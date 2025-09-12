@@ -122,25 +122,22 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
+  // ★★★ ここを改良しました (レス番号の精度向上) ★★★
   function parseContentData(content) {
     const threads = [];
     
-    // =!=!=を使って分割（スレッド区切り）
     const threadParts = content.split(/=!=!=(\d+)=!=!=/);
     
-    // 最初の空要素を削除
     if (threadParts[0] === '') {
       threadParts.shift();
     }
     
-    // スレッドIDとコンテンツをペアで処理
     for (let i = 0; i < threadParts.length; i += 2) {
       const threadId = threadParts[i];
       const threadContent = threadParts[i + 1];
       
       if (!threadId || !threadContent) continue;
       
-      // =?=?=で区切られたタイムスタンプ部分を削除
       const contentParts = threadContent.split('=?=?=');
       let cleanThreadContent = '';
       if (contentParts.length >= 3) {
@@ -150,80 +147,54 @@
       }
       
       if (!cleanThreadContent) continue;
-      
-      // 投稿を分割するパターン（名無しさん＠おーぷんまたは特殊文字付きユーザー名）
-      const postPattern = /(?=(?:名無しさん＠おーぷん|[^\s<>]*?[▼▲★☆][^\s<>]*?)<>)/;
-      let postStrings = cleanThreadContent.split(postPattern).filter(s => s.trim());
-      
-      // 上記パターンで分割できない場合の予備パターン
-      if (postStrings.length <= 1) {
-        const alternatePattern = /(?=.+?<>.+?<>\d{2}\/\d{2}\/\d{2})/;
-        postStrings = cleanThreadContent.split(alternatePattern).filter(s => s.trim());
+
+      let postsData = cleanThreadContent;
+      let threadTitle = "（タイトル不明）";
+
+      // タイトルと投稿群を分離する
+      const lastDelimiterIndex = postsData.lastIndexOf(' <> ');
+      if (lastDelimiterIndex !== -1) {
+          // 最後の区切り文字の後をタイトル候補とする
+          let extractedTitle = postsData.substring(lastDelimiterIndex + 4);
+          // タイトル候補が投稿データの形式でないことを確認
+          if (!extractedTitle.includes('<>') && extractedTitle.length < 100) {
+              threadTitle = extractedTitle.trim();
+              postsData = postsData.substring(0, lastDelimiterIndex);
+          }
       }
       
-      if (postStrings.length === 0) continue;
-
+      // 投稿と投稿の間の区切り文字 " <> " で分割
+      const postStrings = postsData.split(' <> ');
       const posts = [];
-      let threadTitle = "（タイトル不明）";
 
       postStrings.forEach((postStr, index) => {
         const postParts = postStr.split('<>');
         if (postParts.length < 3) return;
 
         const author = postParts[0].trim();
-        let emailOrSage = postParts[1] || '';
+        let emailOrSage = '';
         let dateTimeAndId = '';
         let postContent = '';
-        
-        // sageがある場合とない場合を判定
-        if (postParts.length >= 4 && postParts[2].match(/\d{2}\/\d{2}\/\d{2}/)) {
-          // sage有り: author<>sage<>datetime<>content
-          dateTimeAndId = postParts[2];
-          postContent = postParts.slice(3).join('<>');
-        } else if (postParts.length >= 3 && postParts[1].match(/\d{2}\/\d{2}\/\d{2}/)) {
-          // sage無し: author<>datetime<>content
-          dateTimeAndId = postParts[1];
-          postContent = postParts.slice(2).join('<>');
-          emailOrSage = '';
+
+        // sageの有無を判定
+        if (postParts[2].match(/\d{2}\/\d{2}\/\d{2}/)) {
+            // sage有り: author<>sage<>datetime<>content
+            emailOrSage = postParts[1];
+            dateTimeAndId = postParts[2];
+            postContent = postParts.slice(3).join('<>');
+        } else if (postParts[1].match(/\d{2}\/\d{2}\/\d{2}/)) {
+            // sage無し: author<>datetime<>content
+            emailOrSage = '';
+            dateTimeAndId = postParts[1];
+            postContent = postParts.slice(2).join('<>');
         } else {
-          return; // 形式が合わない場合はスキップ
+            return; // 形式が合わない
         }
 
-        // 最初の投稿からタイトルを抽出
-        if (index === 0 && postContent) {
-          let extractedTitle = '';
-          
-          // タイトルは投稿内容の最後の部分（<>で分割された最後）
-          const contentParts = postContent.split(' <>');
-          if (contentParts.length > 1) {
-            // 最後の部分がタイトル
-            extractedTitle = contentParts[contentParts.length - 1].trim();
-            // タイトル部分を除いた内容を投稿内容とする
-            postContent = contentParts.slice(0, -1).join(' <>').trim();
-          }
-          
-          // タイトルのクリーンアップ
-          if (extractedTitle) {
-            // HTMLタグを除去
-            extractedTitle = extractedTitle.replace(/<[^>]+>/g, '').trim();
-            // URLを除去
-            extractedTitle = extractedTitle.replace(/https?:\/\/[^\s]+/g, '').trim();
-            // 特殊コマンドを除去
-            extractedTitle = extractedTitle.replace(/!nopic\s*★[^<>]*$/g, '').trim();
-            // 前スレ表記を除去
-            extractedTitle = extractedTitle.replace(/^前スレ\s*/g, '').trim();
-            
-            if (extractedTitle && extractedTitle.length > 0) {
-              threadTitle = extractedTitle;
-            }
-          }
-        }
-        
-        // 日時とIDを抽出（ID: の後の空白を許容するように修正）
         const idMatch = dateTimeAndId.match(/(\d{2}\/\d{2}\/\d{2}\([^)]+\) \d{2}:\d{2}:\d{2}) ID:\s*(\S+)/);
         if (idMatch) {
           posts.push({
-            postNumber: index + 1, // レス番号を追加
+            postNumber: index + 1,
             author: author,
             sage: emailOrSage === 'sage',
             postTime: idMatch[1],
@@ -260,7 +231,6 @@
         const contentSize = data.content ? new Blob([data.content]).size : 0;
         const lastUpdated = data.lastUpdated ? new Date(data.lastUpdated.seconds * 1000).toLocaleString('ja-JP') : '不明';
         
-        // データを解析してスレッド数と投稿数を計算
         const threads = parseContentData(data.content || '');
         allDocumentThreads.set(docSnapshot.id, threads);
         
@@ -278,13 +248,10 @@
         });
       }
       
-      // ドキュメントを名前順でソート
       allDocuments.sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
       
       renderDocumentsList();
       updateInfoPanel();
-
-      // URLパラメータから検索クエリを取得して実行
       checkUrlParams();
       
     } catch (err) {
@@ -342,18 +309,14 @@
     
     let termToHighlight = term;
 
-    // "ID:"での検索かを判定（大文字小文字は区別しない）
     const idSearchMatch = term.match(/^id:\s*(.*)/i);
     if (idSearchMatch) {
-        // ID検索の場合は、入力されたID部分（大文字小文字保持）をハイライト対象にする
         termToHighlight = idSearchMatch[1].trim().replace(/\s/g, '');
     }
 
     if (!termToHighlight) return text;
 
-    // 特殊文字をエスケープ
     const escapedTerm = termToHighlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // gフラグ(全体)のみ使用し、大文字小文字を区別してハイライト
     const regex = new RegExp(`(${escapedTerm})`, 'g');
     
     return text.replace(regex, '<span class="highlight">$1</span>');
@@ -370,7 +333,6 @@
         return;
     }
 
-    // 検索結果サマリーを表示
     const totalMatches = results.reduce((sum, r) => sum + r.matchedPosts.length, 0);
     
     summaryDiv.innerHTML = `
@@ -406,7 +368,8 @@
         thread.matchedPosts.forEach(post => {
             const postDiv = document.createElement('div');
             postDiv.className = 'post';
-            const highlightedContent = highlightSearchTerm(post.content, keyword);
+            
+            const postContent = highlightSearchTerm(post.content, keyword);
             const highlightedAuthor = highlightSearchTerm(post.author, keyword);
             const highlightedUserId = highlightSearchTerm(post.userId, keyword);
             const sageIndicator = post.sage ? ' <span style="color: #888; font-size: 0.9em;">[sage]</span>' : '';
@@ -415,7 +378,7 @@
                 <div class="post-meta">
                     <strong>${post.postNumber}: ${highlightedAuthor}</strong>${sageIndicator} | 時刻: ${post.postTime} | ID:${highlightedUserId}
                 </div>
-                <div class="post-content">${highlightedContent}</div>
+                <div class="post-content">${postContent}</div>
             `;
             detailsDiv.appendChild(postDiv);
         });
@@ -431,58 +394,53 @@
     });
   }
 
-  // ★★★ ここを改良しました (ID検索) ★★★
   function searchInThreads(threads, keyword, documentName = null) {
     const lowerKeyword = keyword.toLowerCase();
     const searchResults = [];
 
-    // "ID:"で始まるかチェック（大文字小文字は区別しない `i` フラグ）
     const idSearchMatch = keyword.match(/^id:\s*(.*)/i);
 
     if (idSearchMatch) {
-        // ID専用検索の場合
         const targetId = idSearchMatch[1].trim().replace(/\s/g, '');
         if (targetId) {
             threads.forEach(thread => {
                 const matchedPosts = thread.posts.filter(post => {
                     if (!post.userId) return false;
-                    
-                    // 文字数によって検索方法を切り替える
-                    if (targetId.length < 4) {
-                        // 4文字未満: 大文字小文字を区別する前方一致
-                        return post.userId.startsWith(targetId);
-                    } else {
-                        // 4文字以上: 大文字小文字を区別する部分一致
-                        return post.userId.includes(targetId);
-                    }
+                    return targetId.length < 4 
+                        ? post.userId.startsWith(targetId) 
+                        : post.userId.includes(targetId);
                 });
-
                 if (matchedPosts.length > 0) {
-                    const result = { ...thread, matchedPosts: matchedPosts };
-                    if (documentName) {
-                        result.documentName = documentName;
-                    }
-                    searchResults.push(result);
+                    searchResults.push({ ...thread, matchedPosts, documentName });
                 }
             });
         }
     } else {
-        // 通常の検索（名前、ID、投稿内容）
         const keywordForIdSearch = lowerKeyword.replace(/\s/g, '');
 
         threads.forEach(thread => {
-            const matchedPosts = thread.posts.filter(post => 
+            const postsMatchingKeyword = thread.posts.filter(post => 
                 (post.author && post.author.toLowerCase().includes(lowerKeyword)) ||
                 (post.userId && post.userId.toLowerCase().includes(keywordForIdSearch)) ||
                 (post.content && post.content.toLowerCase().includes(lowerKeyword))
             );
 
-            if (matchedPosts.length > 0) {
-                const result = { ...thread, matchedPosts: matchedPosts };
-                if (documentName) {
-                    result.documentName = documentName;
+            const titleMatches = thread.title.toLowerCase().includes(lowerKeyword);
+
+            if (postsMatchingKeyword.length > 0 || titleMatches) {
+                let finalMatchedPosts = [...postsMatchingKeyword];
+
+                if (titleMatches && thread.posts.length > 0) {
+                    const firstPost = thread.posts[0];
+                    const isFirstPostAlreadyIncluded = finalMatchedPosts.some(p => p.postNumber === 1);
+                    if (!isFirstPostAlreadyIncluded) {
+                        finalMatchedPosts.unshift(firstPost);
+                    }
                 }
-                searchResults.push(result);
+                
+                if(finalMatchedPosts.length > 0){
+                   searchResults.push({ ...thread, matchedPosts: finalMatchedPosts, documentName });
+                }
             }
         });
     }
@@ -504,7 +462,6 @@
 
     document.getElementById('results').innerHTML = '<div class="loading">全ドキュメントを検索中...</div>';
     
-    // 少し遅延を入れてUIの更新を確実にする
     setTimeout(() => {
       let searchResults = [];
       
@@ -513,7 +470,6 @@
         searchResults.push(...docResults);
       });
 
-      // 結果をドキュメント名でソート
       searchResults.sort((a, b) => {
         const nameA = a.documentName || '';
         const nameB = b.documentName || '';
@@ -558,7 +514,6 @@
     const keyword = document.getElementById('searchInput').value.trim();
     
     const url = new URL(window.location);
-    // キーワードがあればセット、なければパラメータを削除
     if (keyword) {
       url.searchParams.set('search', keyword);
     } else {
@@ -567,13 +522,11 @@
     const shareUrl = url.toString();
 
     navigator.clipboard.writeText(shareUrl).then(() => {
-      // 成功したらボタンのテキストを変更し、2秒後に戻す
       shareButton.textContent = 'コピー完了';
       setTimeout(() => {
         shareButton.textContent = originalText;
       }, 2000);
     }).catch(() => {
-      // 失敗した場合のフォールバック
       prompt('以下のURLをコピーしてください:', shareUrl);
     });
   }
@@ -590,7 +543,6 @@
     }
   });
 
-  // ブラウザバック/フォワード対応
   window.addEventListener('popstate', checkUrlParams);
   
   // 初期化
