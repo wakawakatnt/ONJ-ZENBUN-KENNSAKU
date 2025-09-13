@@ -466,9 +466,12 @@
       
       // ステータス更新
       const loadedCount = loadedDocuments.length;
+      const highestId = loadedDocuments.length > 0 ? loadedDocuments[0].id : '';
+      const lowestId = loadedDocuments.length > 0 ? loadedDocuments[loadedDocuments.length - 1].id : '';
+      
       const statusText = loadMode === 'all' 
         ? `全ドキュメント（${loadedCount}/${totalDocumentsAvailable}件）を読み込み完了`
-        : `最新${loadedCount}件のドキュメントを読み込み完了（全${totalDocumentsAvailable}件中）`;
+        : `最新${loadedCount}件のドキュメントを読み込み完了（ID: ${highestId}〜${lowestId} | 全${totalDocumentsAvailable}件中）`;
       document.getElementById('loadStatus').textContent = statusText;
       
       // データ読み込み完了後に検索実行
