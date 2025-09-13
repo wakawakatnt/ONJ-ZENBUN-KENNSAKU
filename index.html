@@ -438,10 +438,28 @@
           postCount: postCount,
           data: data
         });
+      for (const docInfo of docsToProcess) {
+        // データを解析してスレッド数と投稿数を計算
+        const threads = parseContentData(docInfo.data.content || '');
+        loadedDocumentThreads.set(docInfo.id, threads);
+        
+        const threadCount = threads.length;
+        const postCount = threads.reduce((sum, t) => sum + t.posts.length, 0);
+        
+        loadedDocuments.push({
+          id: docInfo.id,
+          name: docInfo.id,
+          size: docInfo.contentSize,
+          lastUpdated: docInfo.lastUpdated,
+          threadCount: threadCount,
+          postCount: postCount,
+          data: docInfo.data
+        });
       }
       
-      // ドキュメントを名前順でソート
-      loadedDocuments.sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
+      // loadedDocumentsは既に最新順でソートされているので、名前順ソートはオプション
+      // ドキュメント一覧では名前順で表示する場合は以下を有効化
+      // loadedDocuments.sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
       
       renderDocumentsList();
       isDataLoaded = true;
