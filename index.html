@@ -6,7 +6,7 @@
 <title>ONJ 掲示板データ検索</title>
 <style>
   body { font-family: system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN',Meiryo,Arial; margin: 18px; line-height: 1.5; background-color: #f4f4f9; color: #333; }
-  input { padding: 10px; width: 70%; margin-right: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 1em; }
+  input[type="text"] { padding: 10px; width: 70%; margin-right: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 1em; }
   button { padding: 10px 18px; border: none; border-radius: 6px; background-color: #1976d2; color: white; cursor: pointer; font-size: 1em; }
   button:hover { background-color: #1565c0; }
   #clearBtn { background-color: #757575; }
@@ -15,8 +15,15 @@
   #docsBtn:hover { background-color: #45a049; }
   #shareBtn { background-color: #ff9800; }
   #shareBtn:hover { background-color: #f57c00; }
+  #refreshBtn { background-color: #f44336; }
+  #refreshBtn:hover { background-color: #d32f2f; }
   .controls { margin-bottom: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .info { background: #e3f2fd; padding: 12px; margin-bottom: 20px; border-radius: 6px; border-left: 5px solid #1976d2; }
+
+  /* フェッチオプション */
+  .fetch-options { background: #fff; border: 1px solid #ddd; padding: 12px; border-radius: 6px; margin-bottom: 20px; display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
+  .fetch-options label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .fetch-options input[type="number"] { width: 65px; padding: 6px; border-radius: 4px; border: 1px solid #ccc; }
 
   /* 検索オプション */
   .search-options-wrapper { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
@@ -74,7 +81,7 @@
   /* レスポンシブ対応 */
   @media (max-width: 768px) {
     .controls { flex-direction: column; align-items: stretch; }
-    input { width: 100%; margin-right: 0; margin-bottom: 10px; }
+    input[type="text"] { width: 100%; margin-right: 0; margin-bottom: 10px; box-sizing: border-box; }
     .document-item { flex-direction: column; align-items: flex-start; gap: 8px; }
     .document-info { flex-direction: column; gap: 5px; }
     .search-type-options label, .sort-options label { display: block; margin-bottom: 8px; }
@@ -90,6 +97,17 @@
   <button id="clearBtn">クリア</button>
   <button id="docsBtn">ドキュメント一覧</button>
   <button id="shareBtn">URL共有</button>
+</div>
+
+<div class="fetch-options">
+  <strong>検索対象:</strong>
+  <label>
+    最新 <input type="number" id="fetchCount" value="5" min="1"> 件
+  </label>
+  <label>
+    <input type="checkbox" id="fetchAllDocs"> 全て取得
+  </label>
+  <button id="refreshBtn" title="キャッシュをクリアして再取得・再検索します">リフレッシュ</button>
 </div>
 
 <div class="search-options-wrapper">
@@ -151,9 +169,12 @@
   
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
+
   let allDocuments = [];
   let allDocumentThreads = new Map(); // ドキュメントID -> スレッドデータのマップ
   let currentSearchResults = []; // 現在の検索結果を保存
+  let totalDocumentCount = 0; // メタから取得する総ドキュメント数
+  let fetchedDocumentIds = new Set(); // 取得済みのドキュメントIDを追跡
 
   function formatBytes(bytes) {
     if (!bytes || bytes === 0) return '0 B';
@@ -165,53 +186,29 @@
 
   function parseDateTime(dateTimeStr) {
     if (!dateTimeStr) return null;
-    
-    // 日本のタイムゾーンで解析（例: "24/12/25(水) 15:30:45"）
     const match = dateTimeStr.match(/(\d{2})\/(\d{2})\/(\d{2})\([^)]+\)\s+(\d{2}):(\d{2}):(\d{2})/);
     if (!match) return null;
-    
     const [, year, month, day, hour, minute, second] = match;
-    // 20XX年として扱う（例: 24 -> 2024）
     const fullYear = parseInt(year) + 2000;
-    
     return new Date(fullYear, parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute), parseInt(second));
   }
-
-  // ### ここからが修正された関数です ###
+  
   function parseContentData(content) {
     const threads = [];
-    
-    // =!=!=を使って分割（スレッド区切り）
     const threadParts = content.split(/=!=!=(\d+)=!=!=/);
+    if (threadParts[0] === '') threadParts.shift();
     
-    // 最初の空要素を削除
-    if (threadParts[0] === '') {
-      threadParts.shift();
-    }
-    
-    // スレッドIDとコンテンツをペアで処理
     for (let i = 0; i < threadParts.length; i += 2) {
       const threadId = threadParts[i];
       const threadContent = threadParts[i + 1];
-      
       if (!threadId || !threadContent) continue;
       
-      // =?=?=で区切られたタイムスタンプ部分を削除
       const contentParts = threadContent.split('=?=?=');
-      let cleanThreadContent = '';
-      if (contentParts.length >= 3) {
-        cleanThreadContent = contentParts.slice(2).join('=?=?=').trim();
-      } else {
-        cleanThreadContent = threadContent.trim();
-      }
-      
+      let cleanThreadContent = (contentParts.length >= 3) ? contentParts.slice(2).join('=?=?=').trim() : threadContent.trim();
       if (!cleanThreadContent) continue;
       
-      // 【修正点1】投稿を分割する正規表現を改善
-      // 名前の開始パターン（「名無しさん」や特定の記号）の直前で分割する
       const postPattern = /(?=(?:名無しさん＠おーぷん|[▼▲★☆■]))/;
       let postStrings = cleanThreadContent.split(postPattern).filter(s => s.trim());
-      
       if (postStrings.length === 0) continue;
 
       const posts = [];
@@ -223,85 +220,54 @@
         if (postParts.length < 3) return;
 
         const author = postParts[0].trim();
-        let emailOrSage = postParts[1] || '';
+        let emailOrSage = '';
         let dateTimeAndId = '';
         let postContent = '';
         
-        // sageがある場合とない場合を判定
         if (postParts.length >= 4 && postParts[2].match(/\d{2}\/\d{2}\/\d{2}/)) {
-          // sage有り: author<>sage<>datetime<>content
+          emailOrSage = postParts[1] || '';
           dateTimeAndId = postParts[2];
           postContent = postParts.slice(3).join('<>');
         } else if (postParts.length >= 3 && postParts[1].match(/\d{2}\/\d{2}\/\d{2}/)) {
-          // sage無し: author<>datetime<>content
           dateTimeAndId = postParts[1];
           postContent = postParts.slice(2).join('<>');
-          emailOrSage = '';
         } else {
-          return; // 形式が合わない場合はスキップ
+          return;
         }
 
-        // 最初の投稿からタイトルを抽出
         if (index === 0 && postContent) {
           let extractedTitle = '';
-          
-          // <> で分割して最後の部分を確認
           const contentTitleParts = postContent.split('<>');
-          
           if (contentTitleParts.length > 1) {
             let candidateTitle = contentTitleParts[contentTitleParts.length - 1].trim();
-            
-            // 【修正点2】タイトルと次の投稿の著者が結合している場合、分離する
             const ninjaPostStartIndex = candidateTitle.search(/[▼▲★☆■]/);
             if (ninjaPostStartIndex !== -1) {
-                // 記号が見つかった場合、その手前までをタイトルとする
                 candidateTitle = candidateTitle.substring(0, ninjaPostStartIndex).trim();
             }
-
-            // HTMLタグを除去
-            candidateTitle = candidateTitle.replace(/<[^>]+>/g, '').trim();
-            
-            // フォントタグなどの残骸を除去
-            candidateTitle = candidateTitle.replace(/^[^>]*>/, '').trim();
-            
-            // 有効なタイトルかチェック
+            candidateTitle = candidateTitle.replace(/<[^>]+>/g, '').trim().replace(/^[^>]*>/, '').trim();
             if (candidateTitle && candidateTitle.length >= 3) {
               extractedTitle = candidateTitle;
-              // タイトル部分を除いた内容を投稿内容とする
               postContent = contentTitleParts.slice(0, -1).join('<>').trim();
             }
           }
-          
-          // それでもタイトルが取れない場合、投稿内容の最初の行から推測
           if (!extractedTitle && postContent) {
-            const firstLine = postContent.split('\n')[0].trim();
-            const cleanFirstLine = firstLine.replace(/<[^>]+>/g, '').trim();
-            
-            if (cleanFirstLine.length >= 3 && cleanFirstLine.length <= 50 && !cleanFirstLine.match(/^https?:\/\//)) {
-              extractedTitle = cleanFirstLine;
+            const firstLine = postContent.split('\n')[0].trim().replace(/<[^>]+>/g, '').trim();
+            if (firstLine.length >= 3 && firstLine.length <= 50 && !firstLine.match(/^https?:\/\//)) {
+              extractedTitle = firstLine;
             }
           }
-          
-          if (extractedTitle) {
-            threadTitle = extractedTitle;
-          }
+          if (extractedTitle) threadTitle = extractedTitle;
         }
         
         const idMatch = dateTimeAndId.match(/(\d{2}\/\d{2}\/\d{2}\([^)]+\) \d{2}:\d{2}:\d{2}) ID:\s*(\S+)/);
         if (idMatch) {
           const postTime = idMatch[1];
           const parsedTime = parseDateTime(postTime);
-          if (parsedTime) {
-            lastPostTime = parsedTime;
-          }
+          if (parsedTime) lastPostTime = parsedTime;
           
           posts.push({
-            postNumber: index + 1,
-            author: author,
-            sage: emailOrSage === 'sage',
-            postTime: postTime,
-            postTimeDate: parsedTime,
-            userId: idMatch[2],
+            postNumber: index + 1, author: author, sage: emailOrSage === 'sage',
+            postTime: postTime, postTimeDate: parsedTime, userId: idMatch[2],
             content: postContent.replace(/<br>/g, '\n').trim()
           });
         }
@@ -309,63 +275,102 @@
       
       if (posts.length > 0) {
         threads.push({
-          id: threadId,
-          title: threadTitle,
+          id: threadId, title: threadTitle,
           link: `https://hayabusa.open2ch.net/test/read.cgi/livejupiter/${threadId}/`,
-          posts: posts,
-          lastUpdated: posts[posts.length - 1].postTime,
-          lastUpdatedDate: lastPostTime
+          posts: posts, lastUpdated: posts[posts.length - 1].postTime, lastUpdatedDate: lastPostTime
         });
       }
     }
-    
     return threads;
   }
-  // ### ここまでが修正された関数です ###
   
-  async function fetchAllDocuments() {
+  async function initializeSystem() {
+    const infoDiv = document.getElementById('info');
     try {
-      document.getElementById('info').innerHTML = '<div class="loading">ドキュメント一覧を読み込み中...</div>';
-      const snapshot = await getDocs(collection(db, "aggregated_threads"));
-      
-      allDocuments = [];
-      allDocumentThreads.clear();
-      
-      for (const docSnapshot of snapshot.docs) {
-        const data = docSnapshot.data();
-        const contentSize = data.content ? new Blob([data.content]).size : 0;
-        const lastUpdated = data.lastUpdated ? new Date(data.lastUpdated.seconds * 1000).toLocaleString('ja-JP') : '不明';
-        
-        // データを解析してスレッド数と投稿数を計算
-        const threads = parseContentData(data.content || '');
-        allDocumentThreads.set(docSnapshot.id, threads);
-        
-        const threadCount = threads.length;
-        const postCount = threads.reduce((sum, t) => sum + t.posts.length, 0);
-        
-        allDocuments.push({
-          id: docSnapshot.id,
-          name: docSnapshot.id,
-          size: contentSize,
-          lastUpdated: lastUpdated,
-          threadCount: threadCount,
-          postCount: postCount,
-          data: data
-        });
+      infoDiv.innerHTML = '<div class="loading">システムを初期化中...</div>';
+      const metaDocRef = doc(db, "meta", "document_count");
+      const metaDocSnap = await getDoc(metaDocRef);
+
+      if (metaDocSnap.exists()) {
+        totalDocumentCount = metaDocSnap.data().totalDocuments;
+        const fetchCountInput = document.getElementById('fetchCount');
+        fetchCountInput.max = totalDocumentCount;
+        if (parseInt(fetchCountInput.value, 10) > totalDocumentCount) {
+            fetchCountInput.value = totalDocumentCount;
+        }
+        infoDiv.innerHTML = `準備完了。全${totalDocumentCount}件のドキュメントから検索できます。`;
+      } else {
+        totalDocumentCount = 0;
+        infoDiv.textContent = 'エラー: ドキュメント数のメタデータが見つかりません。';
+      }
+    } catch (err) {
+      infoDiv.textContent = `初期化エラー: ${err.message}`;
+      console.error(err);
+    }
+    checkUrlParams();
+  }
+
+  async function fetchRequiredDocuments() {
+    const fetchAll = document.getElementById('fetchAllDocs').checked;
+    const fetchCountInput = document.getElementById('fetchCount');
+    let numToFetch = parseInt(fetchCountInput.value, 10);
+
+    if (isNaN(numToFetch) || numToFetch <= 0) {
+      numToFetch = 1;
+      fetchCountInput.value = '1';
+    }
+
+    const docIdsToRequest = new Set();
+    if (fetchAll) {
+      for (let i = 1; i <= totalDocumentCount; i++) docIdsToRequest.add(String(i));
+    } else {
+      const startId = totalDocumentCount;
+      const endId = Math.max(1, totalDocumentCount - numToFetch + 1);
+      for (let i = startId; i >= endId; i--) docIdsToRequest.add(String(i));
+    }
+
+    const newDocIdsToFetch = [...docIdsToRequest].filter(id => !fetchedDocumentIds.has(id));
+    if (newDocIdsToFetch.length === 0) {
+      updateInfoPanel();
+      return true;
+    }
+
+    const infoDiv = document.getElementById('info');
+    infoDiv.innerHTML = `<div class="loading">${newDocIdsToFetch.length}件の新規ドキュメントを読み込み中...</div>`;
+
+    try {
+      const fetchPromises = newDocIdsToFetch.map(id => getDoc(doc(db, "aggregated_threads", id)));
+      const docSnapshots = await Promise.all(fetchPromises);
+
+      for (const docSnapshot of docSnapshots) {
+        if (docSnapshot.exists()) {
+          const docId = docSnapshot.id;
+          const data = docSnapshot.data();
+          const threads = parseContentData(data.content || '');
+          allDocumentThreads.set(docId, threads);
+          
+          if (!allDocuments.some(d => d.id === docId)) {
+            const contentSize = data.content ? new Blob([data.content]).size : 0;
+            const lastUpdated = data.lastUpdated ? new Date(data.lastUpdated.seconds * 1000).toLocaleString('ja-JP') : '不明';
+            const threadCount = threads.length;
+            const postCount = threads.reduce((sum, t) => sum + t.posts.length, 0);
+            allDocuments.push({
+              id: docId, name: docId, size: contentSize, lastUpdated: lastUpdated,
+              threadCount: threadCount, postCount: postCount, data: data
+            });
+          }
+          fetchedDocumentIds.add(docId);
+        }
       }
       
-      // ドキュメントを名前順でソート
       allDocuments.sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
-      
       renderDocumentsList();
       updateInfoPanel();
-
-      // URLパラメータから検索クエリを取得して実行
-      checkUrlParams();
-      
+      return true;
     } catch (err) {
-      document.getElementById('info').textContent = `エラー: ${err.message}`;
+      infoDiv.textContent = `ドキュメントの読み込みエラー: ${err.message}`;
       console.error(err);
+      return false;
     }
   }
 
@@ -373,13 +378,12 @@
     const documentsContent = document.getElementById('documentsContent');
     const documentsCount = document.getElementById('documentsCount');
     
-    documentsCount.textContent = `${allDocuments.length}件のドキュメント`;
+    documentsCount.textContent = `${allDocuments.length}件のドキュメント (読み込み済み)`;
     documentsContent.innerHTML = '';
     
     allDocuments.forEach(doc => {
       const docDiv = document.createElement('div');
       docDiv.className = 'document-item';
-      
       docDiv.innerHTML = `
         <div class="document-name">${doc.name}</div>
         <div class="document-info">
@@ -388,86 +392,56 @@
           <span>更新: ${doc.lastUpdated}</span>
         </div>
       `;
-      
       documentsContent.appendChild(docDiv);
     });
   }
 
   function toggleDocumentsList() {
     const docsList = document.getElementById('documentsList');
-    const isHidden = docsList.style.display === 'none' || docsList.style.display === '';
-    docsList.style.display = isHidden ? 'block' : 'none';
+    docsList.style.display = (docsList.style.display === 'none' || docsList.style.display === '') ? 'block' : 'none';
   }
 
-  function updateInfoPanel(text = null) {
-    if (text) {
-        document.getElementById('info').innerHTML = text;
-    } else if (allDocuments.length > 0) {
+  function updateInfoPanel() {
+    if (allDocumentThreads.size > 0) {
         const totalThreads = Array.from(allDocumentThreads.values()).reduce((sum, threads) => sum + threads.length, 0);
         const totalPosts = Array.from(allDocumentThreads.values()).reduce((sum, threads) => sum + threads.reduce((s, t) => s + t.posts.length, 0), 0);
         document.getElementById('info').innerHTML = `
-          <strong>検索対象:</strong> 全ドキュメント (${allDocuments.length}件) | 
+          <strong>検索対象:</strong> ${allDocumentThreads.size}件のドキュメントを読み込み済み | 
           <strong>総スレッド数:</strong> ${totalThreads} | 
           <strong>総投稿数:</strong> ${totalPosts}
         `;
+    } else {
+        document.getElementById('info').innerHTML = `準備完了。全${totalDocumentCount}件のドキュメントから検索できます。`;
     }
   }
 
   function highlightSearchTerm(text, term) {
     if (!term || !text) return text;
-    
     let termToHighlight = term;
-
-    // "ID:"での検索かを判定（大文字小文字は区別しない）
     const idSearchMatch = term.match(/^id:\s*(.*)/i);
-    if (idSearchMatch) {
-        // ID検索の場合は、入力されたID部分（大文字小文字保持）をハイライト対象にする
-        termToHighlight = idSearchMatch[1].trim().replace(/\s/g, '');
-    }
-
+    if (idSearchMatch) termToHighlight = idSearchMatch[1].trim().replace(/\s/g, '');
     if (!termToHighlight) return text;
-
-    // 特殊文字をエスケープ
     const escapedTerm = termToHighlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // gフラグ(全体)のみ使用し、大文字小文字を区別してハイライト
     const regex = new RegExp(`(${escapedTerm})`, 'g');
-    
     return text.replace(regex, '<span class="highlight">$1</span>');
   }
 
   function sortSearchResults(results, sortOrder) {
     const sortedResults = [...results];
-    
     switch (sortOrder) {
       case 'newest':
-        sortedResults.sort((a, b) => {
-          const dateA = a.lastUpdatedDate || new Date(0);
-          const dateB = b.lastUpdatedDate || new Date(0);
-          return dateB.getTime() - dateA.getTime();
-        });
+        sortedResults.sort((a, b) => (b.lastUpdatedDate || 0) - (a.lastUpdatedDate || 0));
         break;
       case 'oldest':
-        sortedResults.sort((a, b) => {
-          const dateA = a.lastUpdatedDate || new Date(0);
-          const dateB = b.lastUpdatedDate || new Date(0);
-          return dateA.getTime() - dateB.getTime();
-        });
+        sortedResults.sort((a, b) => (a.lastUpdatedDate || 0) - (b.lastUpdatedDate || 0));
         break;
       case 'document':
-        sortedResults.sort((a, b) => {
-          const nameA = a.documentName || '';
-          const nameB = b.documentName || '';
-          return nameA.localeCompare(nameB, undefined, {numeric: true});
-        });
+        sortedResults.sort((a, b) => (a.documentName || '').localeCompare(b.documentName || '', undefined, {numeric: true}));
         break;
       case 'relevance':
-        // 関連度順（マッチした投稿数でソート）
         sortedResults.sort((a, b) => b.matchedPosts.length - a.matchedPosts.length);
         break;
-      default:
-        break;
     }
-    
     return sortedResults;
   }
 
@@ -485,15 +459,11 @@
         return;
     }
 
-    // ソートオプションを表示
     sortOptionsDiv.style.display = 'block';
-
-    // 検索結果サマリーを表示
     const totalMatches = results.reduce((sum, r) => sum + r.matchedPosts.length, 0);
-    
     summaryDiv.innerHTML = `
       <strong>検索結果:</strong> "${keyword}" | 
-      <strong>対象:</strong> 全${allDocuments.length}ドキュメント | 
+      <strong>対象:</strong> ${fetchedDocumentIds.size}ドキュメント | 
       <strong>ヒット:</strong> ${results.length}スレッド, ${totalMatches}投稿
     `;
     summaryDiv.style.display = 'block';
@@ -501,7 +471,6 @@
     results.forEach(thread => {
         const threadDiv = document.createElement('div');
         threadDiv.className = 'thread-result';
-
         const headerDiv = document.createElement('div');
         headerDiv.className = 'thread-header';
         headerDiv.innerHTML = `
@@ -518,36 +487,24 @@
         
         const detailsDiv = document.createElement('div');
         detailsDiv.className = 'thread-details';
-        detailsDiv.innerHTML = `<div class="thread-meta">
-            <a href="${thread.link}" target="_blank" rel="noopener noreferrer">このスレッドへのリンク</a>
-        </div>`;
+        detailsDiv.innerHTML = `<div class="thread-meta"><a href="${thread.link}" target="_blank" rel="noopener noreferrer">このスレッドへのリンク</a></div>`;
 
         thread.matchedPosts.forEach(post => {
             const postDiv = document.createElement('div');
             postDiv.className = 'post';
-            // 検索ワードで投稿内容をハイライトするが、タイトルヒットで表示された1レス目はハイライトしない
             const postContent = (post.content.toLowerCase().includes(keyword.toLowerCase()) || post.author.toLowerCase().includes(keyword.toLowerCase()) || post.userId.toLowerCase().includes(keyword.toLowerCase().replace(/\s/g, '')))
-              ? highlightSearchTerm(post.content, keyword)
-              : post.content;
-
+              ? highlightSearchTerm(post.content, keyword) : post.content;
             const highlightedAuthor = highlightSearchTerm(post.author, keyword);
             const highlightedUserId = highlightSearchTerm(post.userId, keyword);
             const sageIndicator = post.sage ? ' <span style="color: #888; font-size: 0.9em;">[sage]</span>' : '';
-            
             postDiv.innerHTML = `
-                <div class="post-meta">
-                    <strong>${post.postNumber}: ${highlightedAuthor}</strong>${sageIndicator} | 時刻: ${post.postTime} | ID:${highlightedUserId}
-                </div>
+                <div class="post-meta"><strong>${post.postNumber}: ${highlightedAuthor}</strong>${sageIndicator} | 時刻: ${post.postTime} | ID:${highlightedUserId}</div>
                 <div class="post-content">${postContent}</div>
             `;
             detailsDiv.appendChild(postDiv);
         });
 
-        headerDiv.addEventListener('click', () => {
-            const isHidden = detailsDiv.style.display === 'none' || detailsDiv.style.display === '';
-            detailsDiv.style.display = isHidden ? 'block' : 'none';
-        });
-
+        headerDiv.addEventListener('click', () => { detailsDiv.style.display = (detailsDiv.style.display === 'none' || detailsDiv.style.display === '') ? 'block' : 'none'; });
         threadDiv.appendChild(headerDiv);
         threadDiv.appendChild(detailsDiv);
         resultsDiv.appendChild(threadDiv);
@@ -557,103 +514,75 @@
   function searchInThreads(threads, keyword, documentName = null, searchType = 'all') {
     const lowerKeyword = keyword.toLowerCase();
     const searchResults = [];
-
-    // "ID:"で始まるかチェック (スレタイ検索では無効)
     const idSearchMatch = searchType !== 'title' ? keyword.match(/^id:\s*(.*)/i) : null;
 
     if (idSearchMatch) {
-        // ID専用検索 (本文検索 or 全て検索)
         const targetId = idSearchMatch[1].trim().replace(/\s/g, '');
         if (targetId) {
             threads.forEach(thread => {
-                const matchedPosts = thread.posts.filter(post => {
-                    if (!post.userId) return false;
-                    // 文字数によって検索方法を切り替え (大文字小文字を区別)
-                    return targetId.length < 4 
-                        ? post.userId.startsWith(targetId) 
-                        : post.userId.includes(targetId);
-                });
-                if (matchedPosts.length > 0) {
-                    searchResults.push({ ...thread, matchedPosts, documentName });
-                }
+                const matchedPosts = thread.posts.filter(p => p.userId && (targetId.length < 4 ? p.userId.startsWith(targetId) : p.userId.includes(targetId)));
+                if (matchedPosts.length > 0) searchResults.push({ ...thread, matchedPosts, documentName });
             });
         }
     } else {
-        // 通常検索
         const keywordForIdSearch = lowerKeyword.replace(/\s/g, '');
-
         threads.forEach(thread => {
             let postsMatchingKeyword = [];
             let titleMatches = false;
 
-            // 検索タイプに応じて検索対象を切り替え
             if (searchType === 'body' || searchType === 'all') {
-                postsMatchingKeyword = thread.posts.filter(post => 
-                    (post.author && post.author.toLowerCase().includes(lowerKeyword)) ||
-                    (post.userId && post.userId.toLowerCase().includes(keywordForIdSearch)) ||
-                    (post.content && post.content.toLowerCase().includes(lowerKeyword))
+                postsMatchingKeyword = thread.posts.filter(p => 
+                    (p.author && p.author.toLowerCase().includes(lowerKeyword)) ||
+                    (p.userId && p.userId.toLowerCase().includes(keywordForIdSearch)) ||
+                    (p.content && p.content.toLowerCase().includes(lowerKeyword))
                 );
             }
-
             if (searchType === 'title' || searchType === 'all') {
                 titleMatches = thread.title.toLowerCase().includes(lowerKeyword);
             }
 
-            // レスかタイトルのいずれかがヒットした場合
             if (postsMatchingKeyword.length > 0 || titleMatches) {
                 let finalMatchedPosts = [...postsMatchingKeyword];
-
-                // タイトルがヒットした場合、1番目のレスがまだ結果に含まれていなければ追加
-                if (titleMatches && thread.posts.length > 0) {
-                    const firstPost = thread.posts[0];
-                    // 既に本文検索でヒットしている場合を除き、先頭に追加する
-                    if (!finalMatchedPosts.some(p => p.postNumber === firstPost.postNumber)) {
-                        finalMatchedPosts.unshift(firstPost);
-                    }
+                if (titleMatches && thread.posts.length > 0 && !finalMatchedPosts.some(p => p.postNumber === 1)) {
+                    finalMatchedPosts.unshift(thread.posts[0]);
                 }
-                
-                // ヒットした投稿がなければ結果に追加しない
                 if (finalMatchedPosts.length > 0) {
                     searchResults.push({ ...thread, matchedPosts: finalMatchedPosts, documentName });
                 }
             }
         });
     }
-
     return searchResults;
   }
   
-  function searchPosts() {
+  async function searchPosts() {
     const keyword = document.getElementById('searchInput').value.trim();
     if (!keyword) {
       clearSearch();
       return;
     }
 
+    const fetchSuccess = await fetchRequiredDocuments();
+    if (!fetchSuccess) return;
+
     if (allDocumentThreads.size === 0) {
-      updateInfoPanel('<span style="color: #c0392b;">データが読み込まれていません。しばらくお待ちください。</span>');
+      updateInfoPanel('<span style="color: #c0392b;">検索対象のドキュメントがありません。</span>');
       return;
     }
 
-    document.getElementById('results').innerHTML = '<div class="loading">全ドキュメントを検索中...</div>';
+    document.getElementById('results').innerHTML = '<div class="loading">検索中...</div>';
     
-    // 少し遅延を入れてUIの更新を確実にする
     setTimeout(() => {
       let searchResults = [];
       const searchType = document.querySelector('input[name="searchType"]:checked').value;
       
       allDocumentThreads.forEach((threads, docId) => {
-        const docResults = searchInThreads(threads, keyword, docId, searchType);
-        searchResults.push(...docResults);
+        searchResults.push(...searchInThreads(threads, keyword, docId, searchType));
       });
 
-      // 現在の検索結果を保存
       currentSearchResults = searchResults;
-
-      // 選択されたソート順で結果をソート
       const sortOrder = document.querySelector('input[name="sortOrder"]:checked').value;
       const sortedResults = sortSearchResults(searchResults, sortOrder);
-
       renderSearchResults(sortedResults, keyword);
       updateUrlParams(keyword);
     }, 100);
@@ -661,11 +590,9 @@
 
   function applySorting() {
     if (currentSearchResults.length === 0) return;
-    
     const keyword = document.getElementById('searchInput').value.trim();
     const sortOrder = document.querySelector('input[name="sortOrder"]:checked').value;
     const sortedResults = sortSearchResults(currentSearchResults, sortOrder);
-    
     renderSearchResults(sortedResults, keyword);
   }
   
@@ -679,19 +606,28 @@
     updateUrlParams('');
   }
 
+  function resetFetchState() {
+    allDocuments = [];
+    allDocumentThreads.clear();
+    fetchedDocumentIds.clear();
+    currentSearchResults = [];
+    document.getElementById('results').innerHTML = '';
+    document.getElementById('searchSummary').style.display = 'none';
+    document.getElementById('sortOptions').style.display = 'none';
+    renderDocumentsList(); // ドキュメント一覧表示をクリア
+    const infoDiv = document.getElementById('info');
+    infoDiv.innerHTML = `キャッシュをクリアしました。次の検索時にデータを再取得します。<br>準備完了。全${totalDocumentCount}件のドキュメントから検索できます。`;
+  }
+
   function updateUrlParams(keyword) {
     const url = new URL(window.location);
-    if (keyword) {
-      url.searchParams.set('search', keyword);
-    } else {
-      url.searchParams.delete('search');
-    }
+    if (keyword) url.searchParams.set('search', keyword);
+    else url.searchParams.delete('search');
     window.history.pushState({}, '', url);
   }
 
   function checkUrlParams() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const searchParam = urlParams.get('search');
+    const searchParam = new URLSearchParams(window.location.search).get('search');
     if (searchParam) {
       document.getElementById('searchInput').value = searchParam;
       searchPosts();
@@ -702,26 +638,14 @@
     const shareButton = document.getElementById('shareBtn');
     const originalText = shareButton.textContent;
     const keyword = document.getElementById('searchInput').value.trim();
-    
     const url = new URL(window.location);
-    // キーワードがあればセット、なければパラメータを削除
-    if (keyword) {
-      url.searchParams.set('search', keyword);
-    } else {
-      url.searchParams.delete('search');
-    }
-    const shareUrl = url.toString();
+    if (keyword) url.searchParams.set('search', keyword);
+    else url.searchParams.delete('search');
 
-    navigator.clipboard.writeText(shareUrl).then(() => {
-      // 成功したらボタンのテキストを変更し、2秒後に戻す
+    navigator.clipboard.writeText(url.toString()).then(() => {
       shareButton.textContent = 'コピー完了';
-      setTimeout(() => {
-        shareButton.textContent = originalText;
-      }, 2000);
-    }).catch(() => {
-      // 失敗した場合のフォールバック
-      prompt('以下のURLをコピーしてください:', shareUrl);
-    });
+      setTimeout(() => { shareButton.textContent = originalText; }, 2000);
+    }).catch(() => { prompt('以下のURLをコピーしてください:', url.toString()); });
   }
   
   // イベントリスナーの設定
@@ -729,23 +653,42 @@
   document.getElementById('clearBtn').addEventListener('click', clearSearch);
   document.getElementById('docsBtn').addEventListener('click', toggleDocumentsList);
   document.getElementById('shareBtn').addEventListener('click', shareUrl);
-  document.getElementById('searchInput').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
+  
+  document.getElementById('refreshBtn').addEventListener('click', () => {
+    resetFetchState();
+    if (document.getElementById('searchInput').value.trim()) {
       searchPosts();
     }
   });
 
-  // ソートオプションの変更イベントリスナー
+  document.getElementById('fetchAllDocs').addEventListener('change', (e) => {
+    document.getElementById('fetchCount').disabled = e.target.checked;
+    resetFetchState();
+    if (document.getElementById('searchInput').value.trim()) {
+      searchPosts();
+    }
+  });
+  
+  document.getElementById('searchInput').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); searchPosts(); }
+  });
+  
   document.querySelectorAll('input[name="sortOrder"]').forEach(radio => {
     radio.addEventListener('change', applySorting);
   });
 
-  // ブラウザバック/フォワード対応
+  document.querySelectorAll('input[name="searchType"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      if (document.getElementById('searchInput').value.trim()) {
+        searchPosts();
+      }
+    });
+  });
+
   window.addEventListener('popstate', checkUrlParams);
   
   // 初期化
-  fetchAllDocuments();
+  initializeSystem();
 </script>
 </body>
 </html>
