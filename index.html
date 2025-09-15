@@ -4,7 +4,6 @@
 <meta charset="utf--8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ONJ 掲示板データ検索</title>
-<!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-DDHGB57HTW"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -805,6 +804,14 @@
       clearSearch();
       return;
     }
+
+    if (typeof gtag !== 'undefined') {
+  gtag('event', 'search', {
+    search_term: keyword,
+    custom_parameter_1: searchType,
+    custom_parameter_2: fetchAll ? 'all_docs' : `latest_${numToFetch}`
+  });
+}
 
     const fetchSuccess = await fetchRequiredDocuments();
     if (!fetchSuccess) return;
