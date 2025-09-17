@@ -1,16 +1,9 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf--8">
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ONJ 掲示板データ検索</title>
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-DDHGB57HTW"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'G-DDHGB57HTW');
-</script>
 <style>
   body { font-family: system-ui,-apple-system,Segoe UI,Roboto,'Hiragino Kaku Gothic ProN',Meiryo,Arial; margin: 18px; line-height: 1.5; background-color: #f4f4f9; color: #333; }
   input[type="text"] { padding: 10px; width: 70%; margin-right: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 1em; }
@@ -24,6 +17,8 @@
   #shareBtn:hover { background-color: #f57c00; }
   #refreshBtn { background-color: #f44336; }
   #refreshBtn:hover { background-color: #d32f2f; }
+  #helpBtn { background-color: #9c27b0; }
+  #helpBtn:hover { background-color: #7b1fa2; }
   .controls { margin-bottom: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .info { background: #e3f2fd; padding: 12px; margin-bottom: 20px; border-radius: 6px; border-left: 5px solid #1976d2; }
 
@@ -34,9 +29,9 @@
 
   /* 検索オプション */
   .search-options-wrapper { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
-  .search-type-options, .sort-options { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 12px; }
-  .search-type-options label, .sort-options label { margin-right: 20px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
-  .search-type-options input[type="radio"], .sort-options input[type="radio"] { margin-right: 5px; }
+  .search-type-options, .sort-options, .search-mode-options { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 12px; }
+  .search-type-options label, .sort-options label, .search-mode-options label { margin-right: 20px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .search-type-options input[type="radio"], .sort-options input[type="radio"], .search-mode-options input[type="radio"] { margin-right: 5px; }
   .sort-options { display: none; } /* 初期状態は非表示 */
 
   /* ドキュメント一覧のスタイル */
@@ -79,12 +74,16 @@
   .post-buttons { display: inline-flex; gap: 5px; margin-left: 10px; }
   .post-buttons button { padding: 3px 8px; font-size: 0.75em; background-color: #6c757d; }
   .post-buttons button:hover { background-color: #5a6268; }
+  .post-buttons button:disabled { background-color: #aaa; cursor: not-allowed; opacity: 0.6; }
+  .post-buttons .copy-btn { background-color: #17a2b8; }
+  .post-buttons .copy-btn:hover { background-color: #138496; }
   
   /* レスのスタイル */
   .post { border-top: 1px dashed #ccc; padding: 12px 0; position: relative; }
   .post:first-child { border-top: none; }
   .post-meta { font-size: 0.9em; color: #555; margin-bottom: 8px; }
-  .post-meta strong { color: #008000; }
+  .post-meta strong { color: #008000; cursor: pointer; }
+  .post-meta strong:hover { text-decoration: underline; }
   .post-content { white-space: pre-wrap; line-height: 1.6; background: #fafafa; padding: 10px; border-radius: 4px; word-wrap: break-word; }
   .highlight { background-color: #ffeb3b; padding: 1px 2px; border-radius: 2px; }
   
@@ -103,13 +102,20 @@
   .loading::after { content: ''; display: inline-block; width: 20px; height: 20px; border: 2px solid #ddd; border-radius: 50%; border-top-color: #1976d2; animation: spin 1s ease-in-out infinite; margin-left: 10px; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* 説明パネル */
+  .help-panel { background: #fff; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 20px; padding: 20px; display: none; }
+  .help-panel h3 { color: #1976d2; margin-top: 0; }
+  .help-panel h4 { color: #333; margin-top: 20px; margin-bottom: 10px; }
+  .help-panel ul { margin-left: 20px; }
+  .help-panel li { margin-bottom: 5px; }
+
   /* レスポンシブ対応 */
   @media (max-width: 768px) {
     .controls { flex-direction: column; align-items: stretch; }
     input[type="text"] { width: 100%; margin-right: 0; margin-bottom: 10px; box-sizing: border-box; }
     .document-item { flex-direction: column; align-items: flex-start; gap: 8px; }
     .document-info { flex-direction: column; gap: 5px; }
-    .search-type-options label, .sort-options label { display: block; margin-bottom: 8px; }
+    .search-type-options label, .sort-options label, .search-mode-options label { display: block; margin-bottom: 8px; }
   }
 </style>
 </head>
@@ -122,6 +128,7 @@
   <button id="clearBtn">クリア</button>
   <button id="docsBtn">ドキュメント一覧</button>
   <button id="shareBtn">URL共有</button>
+  <button id="helpBtn">説明</button>
 </div>
 
 <div class="fetch-options">
@@ -136,6 +143,19 @@
 </div>
 
 <div class="search-options-wrapper">
+  <div id="searchModeOptions" class="search-mode-options">
+    <strong>検索モード:</strong>
+    <label>
+      <input type="radio" name="searchMode" value="default" checked> 通常検索
+    </label>
+    <label>
+      <input type="radio" name="searchMode" value="and"> AND検索
+    </label>
+    <label>
+      <input type="radio" name="searchMode" value="or"> OR検索
+    </label>
+  </div>
+
   <div id="searchTypeOptions" class="search-type-options">
     <strong>検索範囲:</strong>
     <label>
@@ -164,6 +184,57 @@
       <input type="radio" name="sortOrder" value="relevance"> 関連度順
     </label>
   </div>
+</div>
+
+<div id="helpPanel" class="help-panel">
+  <h3>ONJ掲示板データ検索システム - 使い方ガイド</h3>
+  
+  <h4>概要</h4>
+  <p>このシステムはONJ（おんJつまりなんでも実況Jupiter）掲示板のスレッドデータを検索・閲覧できるツールです。スレッドタイトル、投稿者名、ID、投稿内容を対象に検索できます。</p>
+  
+  <h4>基本的な使い方</h4>
+  <ul>
+    <li><strong>検索:</strong> 検索ボックスにキーワードを入力して「検索」ボタンを押すか、Enterキーを押してください</li>
+    <li><strong>ID検索:</strong> 「id:○○○○」の形式で入力すると、特定のIDで投稿されたレスを検索できます</li>
+    <li><strong>検索範囲:</strong> 「全て」「スレタイのみ」「本文のみ」から選択できます</li>
+    <li><strong>並び順:</strong> 「最新順」「古い順」「ドキュメント名順」「関連度順」から選択できます</li>
+  </ul>
+
+  <h4>検索モード</h4>
+  <ul>
+    <li><strong>通常検索:</strong> 入力したキーワードが含まれているかをチェック</li>
+    <li><strong>AND検索:</strong> 全てのキーワードが含まれているものを検索（スペース区切り）</li>
+    <li><strong>OR検索:</strong> いずれかのキーワードが含まれているものを検索（スペース区切り）</li>
+  </ul>
+  
+  <h4>検索対象の設定</h4>
+  <ul>
+    <li><strong>最新○件:</strong> 最新のドキュメントから指定した件数を検索対象にします</li>
+    <li><strong>全て取得:</strong> チェックすると、利用可能な全てのドキュメントを検索対象にします</li>
+    <li><strong>リフレッシュ:</strong> キャッシュをクリアして最新データを取得し直します</li>
+  </ul>
+  
+  <h4>検索結果の操作</h4>
+  <ul>
+    <li><strong>スレッド展開:</strong> スレッドタイトルをクリックすると、マッチした投稿が表示されます</li>
+    <li><strong>全レス表示:</strong> 「全レス表示」ボタンでスレッド内の全ての投稿を表示できます</li>
+    <li><strong>上100レス/下100レス:</strong> 各投稿の前後100レスを表示できます（上は-100〜-1、下は+1〜+100）</li>
+    <li><strong>レス番号クリック:</strong> レス番号をクリックすると、元スレッドの該当レスへジャンプします</li>
+  </ul>
+  
+  <h4>その他の機能</h4>
+  <ul>
+    <li><strong>URL共有:</strong> 検索結果のURLをコピーして他の人と共有できます</li>
+    <li><strong>ドキュメント一覧:</strong> 利用可能なドキュメントの詳細情報を確認できます</li>
+    <li><strong>スレッドリンク:</strong> 元の掲示板スレッドへのリンクも表示されます</li>
+  </ul>
+
+  <h4>注意</h4>
+  <ul>
+    <li><strong>期間:</strong> 残念ながら9月12日以降のデータしかありません</li>
+    <li><strong>集計できるスレッド:</strong> 強制sageのスレッドは集計できません</li>
+    <li><strong>質問などがあったら:</strong> (URL挿入するから待っててね🥺)</li>
+  </ul>
 </div>
 
 <div id="documentsList" class="documents-list">
@@ -471,6 +542,11 @@
     docsList.style.display = (docsList.style.display === 'none' || docsList.style.display === '') ? 'block' : 'none';
   }
 
+  function toggleHelpPanel() {
+    const helpPanel = document.getElementById('helpPanel');
+    helpPanel.style.display = (helpPanel.style.display === 'none' || helpPanel.style.display === '') ? 'block' : 'none';
+  }
+
   function updateInfoPanel() {
     if (allDocumentThreads.size > 0) {
         const totalThreads = Array.from(allDocumentThreads.values()).reduce((sum, threads) => sum + threads.length, 0);
@@ -491,8 +567,8 @@
     const idSearchMatch = term.match(/^id:\s*(.*)/i);
     if (idSearchMatch) termToHighlight = idSearchMatch[1].trim().replace(/\s/g, '');
     if (!termToHighlight) return text;
-    const escapedTerm = termToHighlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`(${escapedTerm})`, 'g');
+    const escapedTerm = termToHighlight.replace(/[.*+?^${}()|[\]\\]/g, '\\          if (!all');
+    const regex = new RegExp(`(${escapedTerm})`, 'gi');
     return text.replace(regex, '<span class="highlight">$1</span>');
   }
 
@@ -513,11 +589,85 @@
 
     const previewDiv = document.createElement('div');
     previewDiv.className = 'anchor-preview';
+    const cleanContent = targetPost.content.replace(/ <>$/, '').trim();
     previewDiv.innerHTML = `
       <div class="preview-meta">${targetPost.postNumber}: ${targetPost.author} | ${targetPost.postTime} | ID:${targetPost.userId}</div>
-      <div class="preview-content">${targetPost.content.substring(0, 200)}${targetPost.content.length > 200 ? '...' : ''}</div>
+      <div class="preview-content">${cleanContent.substring(0, 200)}${cleanContent.length > 200 ? '...' : ''}</div>
     `;
     return previewDiv;
+  }
+
+  // 安価先のレスを表示する関数
+  function showAnchorPost(postNum, threadId) {
+    const threads = Array.from(allDocumentThreads.values()).flat();
+    const thread = threads.find(t => t.id === threadId);
+    if (!thread) return;
+
+    const targetPost = thread.posts.find(p => p.postNumber === parseInt(postNum));
+    if (!targetPost) return;
+
+    // 該当スレッドの要素を探す
+    const threadElements = document.querySelectorAll('.thread-result');
+    let targetThreadElement = null;
+    
+    threadElements.forEach(element => {
+      const threadTitle = element.querySelector('.thread-title');
+      if (threadTitle && threadTitle.textContent.includes(thread.title)) {
+        targetThreadElement = element;
+      }
+    });
+
+    if (targetThreadElement) {
+      // スレッドの詳細を展開
+      const detailsDiv = targetThreadElement.querySelector('.thread-details');
+      detailsDiv.style.display = 'block';
+      
+      // 既存のレスがあるか確認
+      const existingPosts = detailsDiv.querySelectorAll('.post');
+      let targetPostElement = null;
+      
+      existingPosts.forEach(postElement => {
+        const postMeta = postElement.querySelector('.post-meta strong');
+        if (postMeta && postMeta.textContent.startsWith(postNum + ':')) {
+          targetPostElement = postElement;
+        }
+      });
+
+      // レスが表示されていない場合は追加
+      if (!targetPostElement) {
+        const postDiv = document.createElement('div');
+        postDiv.className = 'post';
+        const cleanContent = targetPost.content.replace(/ <>$/, '').trim();
+        const postContent = processAnchors(cleanContent, thread);
+        const sageIndicator = targetPost.sage ? ' <span style="color: #888; font-size: 0.9em;">[sage]</span>' : '';
+        
+        postDiv.innerHTML = `
+          <div class="post-meta">
+            <strong data-thread-id="${thread.id}" data-post-num="${targetPost.postNumber}">${targetPost.postNumber}: ${targetPost.author}</strong>${sageIndicator} | 時刻: ${targetPost.postTime} | ID:${targetPost.userId}
+            <div class="post-buttons">
+              <button class="range-up" data-post-num="${targetPost.postNumber}">上100レス</button>
+              <button class="range-down" data-post-num="${targetPost.postNumber}">下100レス</button>
+              <button class="copy-btn" data-post-data="${targetPost.postNumber}: ${targetPost.author} | 時刻: ${targetPost.postTime} | ID:${targetPost.userId}
+${cleanContent}">コピペ</button>
+            </div>
+          </div>
+          <div class="post-content">${postContent}</div>
+        `;
+        
+        detailsDiv.appendChild(postDiv);
+        targetPostElement = postDiv;
+        
+        // イベントリスナーを追加
+        addPostEventListeners(postDiv, thread);
+      }
+
+      // スクロールして表示
+      targetPostElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      targetPostElement.style.backgroundColor = '#ffffcc';
+      setTimeout(() => {
+        targetPostElement.style.backgroundColor = '';
+      }, 2000);
+    }
   }
 
   function sortSearchResults(results, sortOrder) {
@@ -540,33 +690,75 @@
   }
 
   // レス範囲表示機能
-  function showPostsInRange(thread, postElement, direction, keyword) {
+  function showPostsInRange(thread, postElement, direction, keyword, button) {
+    // 連打防止：ボタンを無効化
+    button.disabled = true;
+    button.textContent = '読込中...';
+    
     const postNumber = parseInt(postElement.querySelector('.post-meta strong').textContent.split(':')[0]);
-    const startIndex = direction === 'up' ? Math.max(0, postNumber - 101) : postNumber - 1;
-    const endIndex = direction === 'up' ? postNumber - 1 : Math.min(thread.posts.length, postNumber + 99);
+    let startIndex, endIndex;
+    
+    if (direction === 'up') {
+      // 上100レス: レス番号-100から-1まで
+      startIndex = Math.max(0, postNumber - 100 - 1);
+      endIndex = Math.max(0, postNumber - 1);
+    } else {
+      // 下100レス: レス番号+1から+100まで  
+      startIndex = Math.min(thread.posts.length - 1, postNumber);
+      endIndex = Math.min(thread.posts.length, postNumber + 100);
+    }
     
     const postsToShow = thread.posts.slice(startIndex, endIndex);
     const container = document.createElement('div');
-    container.className = 'range-posts';
+    container.className = `range-posts range-posts-${direction}`;
     
     postsToShow.forEach(post => {
       const postDiv = document.createElement('div');
       postDiv.className = 'post';
       
-      const postContent = processAnchors(post.content, thread);
-      const highlightedContent = (post.content.toLowerCase().includes(keyword.toLowerCase()) || 
-                        post.author.toLowerCase().includes(keyword.toLowerCase()) || 
-                        post.userId.toLowerCase().includes(keyword.toLowerCase().replace(/\s/g, '')))
-        ? highlightSearchTerm(postContent, keyword) : postContent;
+      const cleanContent = post.content.replace(/ <>$/, '').trim();
+      const postContent = processAnchors(cleanContent, thread);
+      const highlightedContent = highlightSearchTermInPost(post, keyword) ? highlightSearchTerm(postContent, keyword) : postContent;
       const highlightedAuthor = highlightSearchTerm(post.author, keyword);
       const highlightedUserId = highlightSearchTerm(post.userId, keyword);
       const sageIndicator = post.sage ? ' <span style="color: #888; font-size: 0.9em;">[sage]</span>' : '';
       
       postDiv.innerHTML = `
-        <div class="post-meta"><strong>${post.postNumber}: ${highlightedAuthor}</strong>${sageIndicator} | 時刻: ${post.postTime} | ID:${highlightedUserId}</div>
+        <div class="post-meta">
+          <strong data-thread-id="${thread.id}" data-post-num="${post.postNumber}">${post.postNumber}: ${highlightedAuthor}</strong>${sageIndicator} | 時刻: ${post.postTime} | ID:${highlightedUserId}
+          <div class="post-buttons">
+            <button class="copy-btn" data-post-data="${post.postNumber}: ${post.author} | 時刻: ${post.postTime} | ID:${post.userId}
+${cleanContent}">コピペ</button>
+          </div>
+        </div>
         <div class="post-content">${highlightedContent}</div>
       `;
       container.appendChild(postDiv);
+      
+      // レス番号クリックイベントを追加
+      const postNumElement = postDiv.querySelector('.post-meta strong');
+      postNumElement.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const postNum = postNumElement.getAttribute('data-post-num');
+        const threadId = postNumElement.getAttribute('data-thread-id');
+        window.open(`https://hayabusa.open2ch.net/test/read.cgi/livejupiter/${threadId}/${postNum}-`, '_blank');
+      });
+
+      // コピーボタンのイベントリスナーを追加
+      const copyBtn = postDiv.querySelector('.copy-btn');
+      copyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const postData = copyBtn.getAttribute('data-post-data');
+        navigator.clipboard.writeText(postData).then(() => {
+          const originalText = copyBtn.textContent;
+          copyBtn.textContent = 'コピー完了';
+          setTimeout(() => {
+            copyBtn.textContent = originalText;
+          }, 1000);
+        }).catch(() => {
+          prompt('以下をコピーしてください:', postData);
+        });
+      });
     });
 
     if (direction === 'up') {
@@ -577,10 +769,25 @@
 
     // 安価プレビューイベントを追加
     addAnchorPreviewEvents(container);
+
+    // ボタンを元に戻す（しかし無効化は継続）
+    setTimeout(() => {
+      button.textContent = direction === 'up' ? '上100レス' : '下100レス';
+      // ボタンは無効化したまま（連打防止）
+    }, 500);
   }
 
   function showAllPosts(thread, keyword, threadDiv) {
     const detailsDiv = threadDiv.querySelector('.thread-details');
+    
+    // 既存の範囲表示をすべて削除
+    const rangeElements = detailsDiv.querySelectorAll('.range-posts');
+    rangeElements.forEach(el => el.remove());
+    
+    // 既存のマッチしたレスをすべて削除
+    const existingPosts = detailsDiv.querySelectorAll('.post');
+    existingPosts.forEach(post => post.remove());
+    
     const postsContainer = detailsDiv.querySelector('.posts-container') || (() => {
       const container = document.createElement('div');
       container.className = 'posts-container';
@@ -594,24 +801,107 @@
       const postDiv = document.createElement('div');
       postDiv.className = 'post';
       
-      const postContent = processAnchors(post.content, thread);
-      const highlightedContent = (post.content.toLowerCase().includes(keyword.toLowerCase()) || 
-                        post.author.toLowerCase().includes(keyword.toLowerCase()) || 
-                        post.userId.toLowerCase().includes(keyword.toLowerCase().replace(/\s/g, '')))
-        ? highlightSearchTerm(postContent, keyword) : postContent;
+      const cleanContent = post.content.replace(/ <>$/, '').trim();
+      const postContent = processAnchors(cleanContent, thread);
+      const highlightedContent = highlightSearchTermInPost(post, keyword) ? highlightSearchTerm(postContent, keyword) : postContent;
       const highlightedAuthor = highlightSearchTerm(post.author, keyword);
       const highlightedUserId = highlightSearchTerm(post.userId, keyword);
       const sageIndicator = post.sage ? ' <span style="color: #888; font-size: 0.9em;">[sage]</span>' : '';
       
       postDiv.innerHTML = `
-        <div class="post-meta"><strong>${post.postNumber}: ${highlightedAuthor}</strong>${sageIndicator} | 時刻: ${post.postTime} | ID:${highlightedUserId}</div>
+        <div class="post-meta">
+          <strong data-thread-id="${thread.id}" data-post-num="${post.postNumber}">${post.postNumber}: ${highlightedAuthor}</strong>${sageIndicator} | 時刻: ${post.postTime} | ID:${highlightedUserId}
+          <div class="post-buttons">
+            <button class="copy-btn" data-post-data="${post.postNumber}: ${post.author} | 時刻: ${post.postTime} | ID:${post.userId}
+${cleanContent}">コピペ</button>
+          </div>
+        </div>
         <div class="post-content">${highlightedContent}</div>
       `;
       postsContainer.appendChild(postDiv);
+      
+      // レス番号クリックイベントを追加
+      const postNumElement = postDiv.querySelector('.post-meta strong');
+      postNumElement.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const postNum = postNumElement.getAttribute('data-post-num');
+        const threadId = postNumElement.getAttribute('data-thread-id');
+        window.open(`https://hayabusa.open2ch.net/test/read.cgi/livejupiter/${threadId}/${postNum}-`, '_blank');
+      });
+
+      // コピーボタンのイベントリスナーを追加
+      const copyBtn = postDiv.querySelector('.copy-btn');
+      copyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const postData = copyBtn.getAttribute('data-post-data');
+        navigator.clipboard.writeText(postData).then(() => {
+          const originalText = copyBtn.textContent;
+          copyBtn.textContent = 'コピー完了';
+          setTimeout(() => {
+            copyBtn.textContent = originalText;
+          }, 1000);
+        }).catch(() => {
+          prompt('以下をコピーしてください:', postData);
+        });
+      });
     });
 
     // 安価プレビューイベントを追加
     addAnchorPreviewEvents(postsContainer);
+  }
+
+  function addPostEventListeners(postDiv, thread) {
+    // 上100レス・下100レスボタンのイベントリスナー
+    const upButton = postDiv.querySelector('.range-up');
+    const downButton = postDiv.querySelector('.range-down');
+    const keyword = document.getElementById('searchInput').value.trim();
+    
+    if (upButton) {
+      upButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!upButton.disabled) {
+          showPostsInRange(thread, postDiv, 'up', keyword, upButton);
+        }
+      });
+    }
+    
+    if (downButton) {
+      downButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!downButton.disabled) {
+          showPostsInRange(thread, postDiv, 'down', keyword, downButton);
+        }
+      });
+    }
+    
+    // コピーボタンのイベントリスナー
+    const copyBtn = postDiv.querySelector('.copy-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const postData = copyBtn.getAttribute('data-post-data');
+        navigator.clipboard.writeText(postData).then(() => {
+          const originalText = copyBtn.textContent;
+          copyBtn.textContent = 'コピー完了';
+          setTimeout(() => {
+            copyBtn.textContent = originalText;
+          }, 1000);
+        }).catch(() => {
+          prompt('以下をコピーしてください:', postData);
+        });
+      });
+    }
+    
+    // レス番号クリックイベントを追加
+    const postNumElement = postDiv.querySelector('.post-meta strong');
+    if (postNumElement) {
+      postNumElement.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const postNum = postNumElement.getAttribute('data-post-num');
+        const threadId = postNumElement.getAttribute('data-thread-id');
+        window.open(`https://hayabusa.open2ch.net/test/read.cgi/livejupiter/${threadId}/${postNum}-`, '_blank');
+      });
+    }
   }
 
   function addAnchorPreviewEvents(container) {
@@ -638,7 +928,29 @@
           previewElement = null;
         }
       });
+      
+      // 安価クリックイベントを追加
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const postNum = e.target.getAttribute('data-post-num');
+        const threadId = e.target.getAttribute('data-thread-id');
+        showAnchorPost(postNum, threadId);
+      });
     });
+  }
+
+  // OR/AND検索のヘルパー関数
+  function highlightSearchTermInPost(post, keyword) {
+    const cleanContent = post.content.toLowerCase();
+    const authorLower = post.author.toLowerCase();
+    const userIdLower = post.userId.toLowerCase().replace(/\s/g, '');
+    const keywordLower = keyword.toLowerCase();
+    const keywordForId = keywordLower.replace(/\s/g, '');
+    
+    return cleanContent.includes(keywordLower) || 
+           authorLower.includes(keywordLower) || 
+           userIdLower.includes(keywordForId);
   }
 
   function renderSearchResults(results, keyword) {
@@ -703,41 +1015,28 @@
             const postDiv = document.createElement('div');
             postDiv.className = 'post';
             
-            const postContent = processAnchors(post.content, thread);
-            const highlightedContent = (post.content.toLowerCase().includes(keyword.toLowerCase()) || 
-                          post.author.toLowerCase().includes(keyword.toLowerCase()) || 
-                          post.userId.toLowerCase().includes(keyword.toLowerCase().replace(/\s/g, '')))
-              ? highlightSearchTerm(postContent, keyword) : postContent;
+            const cleanContent = post.content.replace(/ <>$/, '').trim();
+            const postContent = processAnchors(cleanContent, thread);
+            const highlightedContent = highlightSearchTermInPost(post, keyword) ? highlightSearchTerm(postContent, keyword) : postContent;
             const highlightedAuthor = highlightSearchTerm(post.author, keyword);
             const highlightedUserId = highlightSearchTerm(post.userId, keyword);
             const sageIndicator = post.sage ? ' <span style="color: #888; font-size: 0.9em;">[sage]</span>' : '';
             
             postDiv.innerHTML = `
                 <div class="post-meta">
-                  <strong>${post.postNumber}: ${highlightedAuthor}</strong>${sageIndicator} | 時刻: ${post.postTime} | ID:${highlightedUserId}
+                  <strong data-thread-id="${thread.id}" data-post-num="${post.postNumber}">${post.postNumber}: ${highlightedAuthor}</strong>${sageIndicator} | 時刻: ${post.postTime} | ID:${highlightedUserId}
                   <div class="post-buttons">
                     <button class="range-up" data-post-num="${post.postNumber}">上100レス</button>
                     <button class="range-down" data-post-num="${post.postNumber}">下100レス</button>
+                    <button class="copy-btn" data-post-data="${post.postNumber}: ${post.author} | 時刻: ${post.postTime} | ID:${post.userId}
+${cleanContent}">コピペ</button>
                   </div>
                 </div>
                 <div class="post-content">${highlightedContent}</div>
             `;
             
-            // 上100レス・下100レスボタンのイベントリスナー
-            const upButton = postDiv.querySelector('.range-up');
-            const downButton = postDiv.querySelector('.range-down');
-            
-            upButton.addEventListener('click', (e) => {
-              e.stopPropagation();
-              showPostsInRange(thread, postDiv, 'up', keyword);
-              upButton.disabled = true;
-            });
-            
-            downButton.addEventListener('click', (e) => {
-              e.stopPropagation();
-              showPostsInRange(thread, postDiv, 'down', keyword);
-              downButton.disabled = true;
-            });
+            // イベントリスナーを追加
+            addPostEventListeners(postDiv, thread);
             
             detailsDiv.appendChild(postDiv);
         });
@@ -754,9 +1053,10 @@
     });
   }
 
-  function searchInThreads(threads, keyword, documentName = null, searchType = 'all') {
-    const lowerKeyword = keyword.toLowerCase();
+  function searchInThreads(threads, keyword, documentName = null, searchType = 'all', searchMode = 'default') {
     const searchResults = [];
+    
+    // 通常のID検索
     const idSearchMatch = searchType !== 'title' ? keyword.match(/^id:\s*(.*)/i) : null;
 
     if (idSearchMatch) {
@@ -768,6 +1068,67 @@
             });
         }
     } else {
+        // OR/AND検索の処理
+        if (searchMode === 'and' || searchMode === 'or') {
+            const keywords = keyword.split(/\s+/).filter(k => k.trim());
+            if (keywords.length > 1) {
+                threads.forEach(thread => {
+                    let postsMatchingKeyword = [];
+                    let titleMatches = false;
+
+                    if (searchType === 'body' || searchType === 'all') {
+                        postsMatchingKeyword = thread.posts.filter(post => {
+                            const cleanContent = post.content.toLowerCase();
+                            const authorLower = post.author.toLowerCase();
+                            const userIdLower = post.userId.toLowerCase().replace(/\s/g, '');
+                            
+                            if (searchMode === 'and') {
+                                // AND検索: 全てのキーワードが含まれている
+                                return keywords.every(kw => {
+                                    const kwLower = kw.toLowerCase();
+                                    const kwForId = kwLower.replace(/\s/g, '');
+                                    return cleanContent.includes(kwLower) || 
+                                           authorLower.includes(kwLower) || 
+                                           userIdLower.includes(kwForId);
+                                });
+                            } else {
+                                // OR検索: いずれかのキーワードが含まれている
+                                return keywords.some(kw => {
+                                    const kwLower = kw.toLowerCase();
+                                    const kwForId = kwLower.replace(/\s/g, '');
+                                    return cleanContent.includes(kwLower) || 
+                                           authorLower.includes(kwLower) || 
+                                           userIdLower.includes(kwForId);
+                                });
+                            }
+                        });
+                    }
+                    
+                    if (searchType === 'title' || searchType === 'all') {
+                        const titleLower = thread.title.toLowerCase();
+                        if (searchMode === 'and') {
+                            titleMatches = keywords.every(kw => titleLower.includes(kw.toLowerCase()));
+                        } else {
+                            titleMatches = keywords.some(kw => titleLower.includes(kw.toLowerCase()));
+                        }
+                    }
+
+                    if (postsMatchingKeyword.length > 0 || titleMatches) {
+                        let finalMatchedPosts = [...postsMatchingKeyword];
+                        if (titleMatches && thread.posts.length > 0 && !finalMatchedPosts.some(p => p.postNumber === 1)) {
+                            finalMatchedPosts.unshift(thread.posts[0]);
+                        }
+                        if (finalMatchedPosts.length > 0) {
+                            searchResults.push({ ...thread, matchedPosts: finalMatchedPosts, documentName });
+                        }
+                    }
+                });
+                return searchResults;
+            }
+        }
+        
+        // 通常検索（デフォルト）
+        const lowerKeyword = keyword.toLowerCase();
         const keywordForIdSearch = lowerKeyword.replace(/\s/g, '');
         threads.forEach(thread => {
             let postsMatchingKeyword = [];
@@ -818,16 +1179,18 @@
     setTimeout(() => {
       let searchResults = [];
       const searchType = document.querySelector('input[name="searchType"]:checked').value;
+      const searchMode = document.querySelector('input[name="searchMode"]:checked').value;
       
+      // 検索実行
       allDocumentThreads.forEach((threads, docId) => {
-        searchResults.push(...searchInThreads(threads, keyword, docId, searchType));
+        searchResults.push(...searchInThreads(threads, keyword, docId, searchType, searchMode));
       });
 
       currentSearchResults = searchResults;
       const sortOrder = document.querySelector('input[name="sortOrder"]:checked').value;
       const sortedResults = sortSearchResults(searchResults, sortOrder);
       renderSearchResults(sortedResults, keyword);
-      updateUrlParams(keyword);
+      updateUrlParams(keyword, searchType);
     }, 100);
   }
 
@@ -846,7 +1209,7 @@
     document.getElementById('sortOptions').style.display = 'none';
     currentSearchResults = [];
     updateInfoPanel();
-    updateUrlParams('');
+    updateUrlParams('', 'all');
   }
 
   function resetFetchState() {
@@ -857,20 +1220,77 @@
     document.getElementById('results').innerHTML = '';
     document.getElementById('searchSummary').style.display = 'none';
     document.getElementById('sortOptions').style.display = 'none';
-    renderDocumentsList(); // ドキュメント一覧表示をクリア
+    renderDocumentsList();
     const infoDiv = document.getElementById('info');
     infoDiv.innerHTML = `キャッシュをクリアしました。次の検索時にデータを再取得します。<br>準備完了。全${totalDocumentCount}件のドキュメントから検索できます。`;
   }
 
-  function updateUrlParams(keyword) {
+  function updateUrlParams(keyword, searchType = null, searchMode = null) {
     const url = new URL(window.location);
-    if (keyword) url.searchParams.set('search', keyword);
-    else url.searchParams.delete('search');
+    
+    // 検索キーワードの設定
+    if (keyword) {
+      url.searchParams.set('search', keyword);
+    } else {
+      url.searchParams.delete('search');
+    }
+    
+    // 検索範囲の設定
+    if (searchType && searchType !== 'all') {
+      if (searchType === 'title') {
+        url.searchParams.set('type', 'suretai');
+      } else if (searchType === 'body') {
+        url.searchParams.set('type', 'honbun');
+      }
+    } else {
+      url.searchParams.set('type', 'subete');
+    }
+    
+    // 検索モードの設定
+    if (searchMode) {
+      if (searchMode === 'and') {
+        url.searchParams.set('mode', 'and');
+      } else if (searchMode === 'or') {
+        url.searchParams.set('mode', 'or');
+      } else {
+        url.searchParams.set('mode', 'tuuzyou');
+      }
+    } else {
+      url.searchParams.set('mode', 'tuuzyou');
+    }
+    
     window.history.pushState({}, '', url);
   }
 
   function checkUrlParams() {
-    const searchParam = new URLSearchParams(window.location.search).get('search');
+    const params = new URLSearchParams(window.location.search);
+    const searchParam = params.get('search');
+    const typeParam = params.get('type');
+    const modeParam = params.get('mode');
+    
+    // 検索範囲の設定
+    if (typeParam) {
+      if (typeParam === 'suretai') {
+        document.querySelector('input[name="searchType"][value="title"]').checked = true;
+      } else if (typeParam === 'honbun') {
+        document.querySelector('input[name="searchType"][value="body"]').checked = true;
+      } else {
+        document.querySelector('input[name="searchType"][value="all"]').checked = true;
+      }
+    }
+    
+    // 検索モードの設定
+    if (modeParam) {
+      if (modeParam === 'and') {
+        document.querySelector('input[name="searchMode"][value="and"]').checked = true;
+      } else if (modeParam === 'or') {
+        document.querySelector('input[name="searchMode"][value="or"]').checked = true;
+      } else {
+        document.querySelector('input[name="searchMode"][value="default"]').checked = true;
+      }
+    }
+    
+    // 検索実行
     if (searchParam) {
       document.getElementById('searchInput').value = searchParam;
       searchPosts();
@@ -881,14 +1301,29 @@
     const shareButton = document.getElementById('shareBtn');
     const originalText = shareButton.textContent;
     const keyword = document.getElementById('searchInput').value.trim();
+    const searchType = document.querySelector('input[name="searchType"]:checked').value;
+    
     const url = new URL(window.location);
-    if (keyword) url.searchParams.set('search', keyword);
-    else url.searchParams.delete('search');
+    if (keyword) {
+      url.searchParams.set('search', keyword);
+      if (searchType === 'title') {
+        url.searchParams.set('type', 'suretai');
+      } else if (searchType === 'body') {
+        url.searchParams.set('type', 'honbun');
+      } else {
+        url.searchParams.set('type', 'subete');
+      }
+    } else {
+      url.searchParams.delete('search');
+      url.searchParams.delete('type');
+    }
 
     navigator.clipboard.writeText(url.toString()).then(() => {
       shareButton.textContent = 'コピー完了';
       setTimeout(() => { shareButton.textContent = originalText; }, 2000);
-    }).catch(() => { prompt('以下のURLをコピーしてください:', url.toString()); });
+    }).catch(() => { 
+      prompt('以下のURLをコピーしてください:', url.toString()); 
+    });
   }
   
   // イベントリスナーの設定
@@ -896,6 +1331,7 @@
   document.getElementById('clearBtn').addEventListener('click', clearSearch);
   document.getElementById('docsBtn').addEventListener('click', toggleDocumentsList);
   document.getElementById('shareBtn').addEventListener('click', shareUrl);
+  document.getElementById('helpBtn').addEventListener('click', toggleHelpPanel);
   
   document.getElementById('refreshBtn').addEventListener('click', () => {
     resetFetchState();
@@ -921,6 +1357,14 @@
   });
 
   document.querySelectorAll('input[name="searchType"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      if (document.getElementById('searchInput').value.trim()) {
+        searchPosts();
+      }
+    });
+  });
+
+  document.querySelectorAll('input[name="searchMode"]').forEach(radio => {
     radio.addEventListener('change', () => {
       if (document.getElementById('searchInput').value.trim()) {
         searchPosts();
