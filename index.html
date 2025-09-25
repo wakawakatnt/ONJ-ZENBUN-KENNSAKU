@@ -402,9 +402,7 @@
             // 最後の有効なパートを探す（URLやIDを除く）
             for (let j = bodyParts.length - 1; j >= 0; j--) {
               const part = bodyParts[j].trim();
-              if (part && part.length >= 1 && 
-    !part.startsWith('http') && 
-    !part.includes('ID:')) {
+              if (part && part.length >= 1) {
                 titleCandidate = part;
                 break;
               }
