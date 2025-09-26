@@ -100,6 +100,12 @@
   .anchor-preview .preview-meta { font-weight: bold; color: #008000; margin-bottom: 5px; }
   .anchor-preview .preview-content { white-space: pre-wrap; line-height: 1.4; }
 
+  /* メディア埋め込み */
+  .media-embed { margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; }
+  .media-embed img { max-width: 100%; height: auto; display: block; }
+  .media-embed iframe { width: 100%; height: 400px; border: none; }
+  .media-embed-x iframe { height: 500px; }
+
   /* 検索結果サマリー */
   .search-summary { background: #fff3cd; border: 1px solid #ffeaa7; padding: 12px; border-radius: 6px; margin-bottom: 20px; }
   .search-summary strong { color: #856404; }
@@ -586,15 +592,50 @@
     const idSearchMatch = term.match(/^id:\s*(.*)/i);
     if (idSearchMatch) termToHighlight = idSearchMatch[1].trim().replace(/\s/g, '');
     if (!termToHighlight) return text;
-    const escapedTerm = termToHighlight.replace(/[.*+?^${}()|[\]\\]/g, '\\          if (!all');
+    const escapedTerm = termToHighlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`(${escapedTerm})`, 'gi');
     return text.replace(regex, '<span class="highlight">$1</span>');
   }
 
   function processAnchors(content, thread) {
-    return content.replace(/>>\d+/g, (match) => {
-      const postNum = match.substring(2);
+    // エスケープされた安価（&gt;&gt;数字）と通常の安価（>>数字）の両方を処理
+    return content.replace(/(&gt;&gt;\d+|>>\d+)/g, (match) => {
+      const postNum = match.replace(/&gt;&gt;|>>/, '');
       return `<span class="anchor-link" data-post-num="${postNum}" data-thread-id="${thread.id}">${match}</span>`;
+    });
+  }
+
+  function embedMedia(content) {
+    // URLパターンの定義
+    const urlPattern = /https?:\/\/[^\s<>]+/g;
+    const processedUrls = new Set();
+    
+    return content.replace(urlPattern, (url) => {
+      // 同じURLを複数回処理しないようにする
+      if (processedUrls.has(url)) return url;
+      processedUrls.add(url);
+      
+      let embedHtml = '';
+      
+      // imgur画像
+      if (url.match(/https?:\/\/(?:i\.)?imgur\.com\/([a-zA-Z0-9]+)(?:\.[a-zA-Z]+)?/)) {
+        const imgId = url.match(/\/([a-zA-Z0-9]+)(?:\.[a-zA-Z]+)?$/)[1];
+        embedHtml = `<div class="media-embed"><img src="https://i.imgur.com/${imgId}.jpg" alt="imgur image" loading="lazy" onerror="this.parentElement.style.display='none'"></div>`;
+      }
+      // YouTube
+      else if (url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]+)/)) {
+        const videoId = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]+)/)[1];
+        embedHtml = `<div class="media-embed"><iframe src="https://www.youtube.com/embed/${videoId}" allowfullscreen loading="lazy"></iframe></div>`;
+      }
+      // X (Twitter)
+      else if (url.match(/https?:\/\/(?:twitter\.com|x\.com)\/[^\/]+\/status\/(\d+)/)) {
+        const tweetId = url.match(/\/status\/(\d+)/)[1];
+        const tweetUrl = encodeURIComponent(url);
+        embedHtml = `<div class="media-embed media-embed-x"><iframe src="https://platform.twitter.com/embed/Tweet.html?id=${tweetId}" loading="lazy"></iframe></div>`;
+      }
+      
+      // 埋め込みHTMLがある場合は、URLの上に配置
+      return embedHtml ? embedHtml + url : url;
     });
   }
 
@@ -657,7 +698,8 @@
         const postDiv = document.createElement('div');
         postDiv.className = 'post';
         const cleanContent = targetPost.content.replace(/ <>$/, '').trim();
-        const postContent = processAnchors(cleanContent, thread);
+        let postContent = processAnchors(cleanContent, thread);
+        postContent = embedMedia(postContent);
         const sageIndicator = targetPost.sage ? ' <span style="color: #888; font-size: 0.9em;">[sage]</span>' : '';
         
         postDiv.innerHTML = `
@@ -708,11 +750,15 @@ ${cleanContent}">コピペ</button>
     return sortedResults;
   }
 
-  // レス範囲表示機能
+  // レス範囲表示機能（改良版：スクロール位置を維持）
   function showPostsInRange(thread, postElement, direction, keyword, button) {
     // 連打防止：ボタンを無効化
     button.disabled = true;
     button.textContent = '読込中...';
+    
+    // 現在のスクロール位置と要素の位置を記憶
+    const originalScrollTop = window.pageYOffset;
+    const originalElementTop = postElement.getBoundingClientRect().top;
     
     const postNumber = parseInt(postElement.querySelector('.post-meta strong').textContent.split(':')[0]);
     let startIndex, endIndex;
@@ -736,7 +782,8 @@ ${cleanContent}">コピペ</button>
       postDiv.className = 'post';
       
       const cleanContent = post.content.replace(/ <>$/, '').trim();
-      const postContent = processAnchors(cleanContent, thread);
+      let postContent = processAnchors(cleanContent, thread);
+      postContent = embedMedia(postContent);
       const highlightedContent = highlightSearchTermInPost(post, keyword) ? highlightSearchTerm(postContent, keyword) : postContent;
       const highlightedAuthor = highlightSearchTerm(post.author, keyword);
       const highlightedUserId = highlightSearchTerm(post.userId, keyword);
@@ -782,6 +829,13 @@ ${cleanContent}">コピペ</button>
 
     if (direction === 'up') {
       postElement.parentNode.insertBefore(container, postElement);
+      
+      // 上100レスの場合：スクロール位置を調整して元の位置を維持
+      setTimeout(() => {
+        const newElementTop = postElement.getBoundingClientRect().top;
+        const scrollAdjustment = newElementTop - originalElementTop;
+        window.scrollTo(0, originalScrollTop + scrollAdjustment);
+      }, 0);
     } else {
       postElement.parentNode.insertBefore(container, postElement.nextSibling);
     }
@@ -821,7 +875,8 @@ ${cleanContent}">コピペ</button>
       postDiv.className = 'post';
       
       const cleanContent = post.content.replace(/ <>$/, '').trim();
-      const postContent = processAnchors(cleanContent, thread);
+      let postContent = processAnchors(cleanContent, thread);
+      postContent = embedMedia(postContent);
       const highlightedContent = highlightSearchTermInPost(post, keyword) ? highlightSearchTerm(postContent, keyword) : postContent;
       const highlightedAuthor = highlightSearchTerm(post.author, keyword);
       const highlightedUserId = highlightSearchTerm(post.userId, keyword);
@@ -1035,7 +1090,8 @@ ${cleanContent}">コピペ</button>
             postDiv.className = 'post';
             
             const cleanContent = post.content.replace(/ <>$/, '').trim();
-            const postContent = processAnchors(cleanContent, thread);
+            let postContent = processAnchors(cleanContent, thread);
+            postContent = embedMedia(postContent);
             const highlightedContent = highlightSearchTermInPost(post, keyword) ? highlightSearchTerm(postContent, keyword) : postContent;
             const highlightedAuthor = highlightSearchTerm(post.author, keyword);
             const highlightedUserId = highlightSearchTerm(post.userId, keyword);
